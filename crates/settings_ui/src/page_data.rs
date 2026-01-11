@@ -3405,7 +3405,7 @@ fn window_and_layout_page() -> SettingsPage {
         ]
     }
 
-    fn tab_bar_section() -> [SettingsPageItem; 8] {
+    fn tab_bar_section() -> [SettingsPageItem; 9] {
         [
             SettingsPageItem::SectionHeader("Tab Bar"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -3416,6 +3416,19 @@ fn window_and_layout_page() -> SettingsPage {
                     pick: |settings_content| settings_content.tab_bar.as_ref()?.show.as_ref(),
                     write: |settings_content, value| {
                         settings_content.tab_bar.get_or_insert_default().show = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Tab Bar Layout",
+                description: "Select a horizontal or vertical tab layout.",
+                field: Box::new(SettingField {
+                    json_path: Some("tab_bar.layout"),
+                    pick: |settings_content| settings_content.tab_bar.as_ref()?.layout.as_ref(),
+                    write: |settings_content, value| {
+                        settings_content.tab_bar.get_or_insert_default().layout = value;
                     },
                 }),
                 metadata: None,

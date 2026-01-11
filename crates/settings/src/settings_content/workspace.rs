@@ -405,6 +405,10 @@ pub struct TabBarSettingsContent {
     ///
     /// Default: true
     pub show: Option<bool>,
+    /// Layout of the tab bar.
+    ///
+    /// Default: vertical
+    pub layout: Option<TabBarLayout>,
     /// Whether or not to show the navigation history buttons in the tab bar.
     ///
     /// Default: true
@@ -413,6 +417,27 @@ pub struct TabBarSettingsContent {
     ///
     /// Default: true
     pub show_tab_bar_buttons: Option<bool>,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantNames,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TabBarLayout {
+    Horizontal,
+    #[default]
+    Vertical,
 }
 
 #[with_fallible_options]

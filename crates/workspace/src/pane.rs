@@ -1,6 +1,6 @@
 use crate::{
-    CloseWindow, NewFile, NewTerminal, OpenInTerminal, OpenOptions, OpenTerminal, OpenVisible,
-    SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom, Workspace,
+    CloseWindow, NewFile, NewTerminal, OpenFiles, OpenInTerminal, OpenOptions, OpenTerminal,
+    OpenVisible, SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom, Workspace,
     WorkspaceItemBuilder, ZoomIn, ZoomOut,
     invalid_item_view::InvalidItemView,
     item::{
@@ -12,7 +12,7 @@ use crate::{
     notifications::NotifyResultExt,
     toolbar::Toolbar,
     utility_pane::UtilityPaneSlot,
-    workspace_settings::{AutosaveSetting, TabBarSettings, WorkspaceSettings},
+    workspace_settings::{AutosaveSetting, TabBarLayout, TabBarSettings, WorkspaceSettings},
 };
 use anyhow::Result;
 use collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -47,9 +47,9 @@ use std::{
 };
 use theme::ThemeSettings;
 use ui::{
-    ContextMenu, ContextMenuEntry, ContextMenuItem, DecoratedIcon, IconButtonShape, IconDecoration,
-    IconDecorationKind, Indicator, PopoverMenu, PopoverMenuHandle, Tab, TabBar, TabPosition,
-    Tooltip, prelude::*, right_click_menu,
+    ButtonLike, ContextMenu, ContextMenuEntry, ContextMenuItem, DecoratedIcon, Divider,
+    DividerColor, IconButtonShape, IconDecoration, IconDecorationKind, Indicator, PopoverMenu,
+    PopoverMenuHandle, Tab, TabBar, TabPosition, Tooltip, prelude::*, right_click_menu,
 };
 use util::{ResultExt, debug_panic, maybe, paths::PathStyle, truncate_and_remove_front};
 
@@ -59,6 +59,9 @@ pub struct SelectedEntry {
     pub worktree_id: WorktreeId,
     pub entry_id: ProjectEntryId,
 }
+
+const MINIMAL_UI: bool = true;
+const VERTICAL_TAB_BAR_WIDTH: Pixels = px(148.0);
 
 /// A group of selected entries from project panel.
 #[derive(Debug)]
@@ -3320,7 +3323,10 @@ impl Pane {
                 .flatten()
                 .unwrap_or(false);
 
+        let open_file_button = self.render_open_file_button_horizontal(window, cx);
+
         TabBar::new("tab_bar")
+            .start_child(open_file_button)
             .map(|tab_bar| {
                 if let Some(open_aside_left) = open_aside_left
                     && render_aside_toggle_left
@@ -3431,6 +3437,114 @@ impl Pane {
                     tab_bar
                 }
             })
+            .into_any_element()
+    }
+
+    fn render_vertical_tab_bar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Pane>,
+    ) -> AnyElement {
+        let Some(_workspace) = self.workspace.upgrade() else {
+            return gpui::Empty.into_any();
+        };
+
+        let focus_handle = self.focus_handle.clone();
+        let mut tab_items = self
+            .items
+            .iter()
+            .enumerate()
+            .zip(tab_details(&self.items, window, cx))
+            .map(|((ix, item), detail)| {
+                div()
+                    .w_full()
+                    .child(self.render_tab(ix, &**item, detail, &focus_handle, window, cx))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        let tab_count = tab_items.len();
+        if self.is_tab_pinned(tab_count) {
+            log::warn!(
+                "Pinned tab count ({}) exceeds actual tab count ({}). \
+                This should not happen. If possible, add reproduction steps, \
+                in a comment, to https://github.com/zed-industries/zed/issues/33342",
+                self.pinned_tab_count,
+                tab_count
+            );
+            self.pinned_tab_count = tab_count;
+        }
+
+        let unpinned_tabs = tab_items.split_off(self.pinned_tab_count);
+        let pinned_tabs = tab_items;
+        let has_pinned_tabs = !pinned_tabs.is_empty();
+        let has_unpinned_tabs = !unpinned_tabs.is_empty();
+
+        v_flex()
+            .id("vertical_tab_bar")
+            .w(VERTICAL_TAB_BAR_WIDTH)
+            .h_full()
+            .flex_none()
+            .overflow_y_scroll()
+            .track_scroll(&self.tab_bar_scroll_handle)
+            .items_stretch()
+            .pt_1()
+            .pb_1()
+            .bg(cx.theme().colors().tab_bar_background)
+            .border_r_1()
+            .border_color(cx.theme().colors().border_variant)
+            .child(self.render_open_file_button_vertical(window, cx))
+            .child(Divider::horizontal().color(DividerColor::BorderVariant))
+            .children(pinned_tabs)
+            .when(has_unpinned_tabs && has_pinned_tabs, |this| {
+                this.child(Divider::horizontal().color(DividerColor::BorderVariant))
+            })
+            .children(unpinned_tabs)
+            .into_any_element()
+    }
+
+    fn render_open_file_button_horizontal(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Pane>,
+    ) -> AnyElement {
+        IconButton::new("tab_bar_open_file", IconName::Plus)
+            .icon_size(IconSize::Small)
+            .shape(IconButtonShape::Square)
+            .tooltip(Tooltip::text("Open File"))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(OpenFiles.boxed_clone(), cx);
+            })
+            .into_any_element()
+    }
+
+    fn render_open_file_button_vertical(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Pane>,
+    ) -> AnyElement {
+        div()
+            .px_2()
+            .py_0p5()
+            .child(
+                ButtonLike::new("vertical_tab_open_file")
+                    .full_width()
+                    .size(ButtonSize::Medium)
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Icon::new(IconName::Plus)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(Label::new("Open").color(Color::Muted)),
+                    )
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(OpenFiles.boxed_clone(), cx);
+                    }),
+            )
             .into_any_element()
     }
 
@@ -3965,6 +4079,10 @@ impl Render for Pane {
 
         let should_display_tab_bar = self.should_display_tab_bar.clone();
         let display_tab_bar = should_display_tab_bar(window, cx);
+        let tab_bar_layout = TabBarSettings::get_global(cx).layout;
+        let use_vertical_tabs = display_tab_bar
+            && self.active_item().is_some()
+            && tab_bar_layout == TabBarLayout::Vertical;
         let Some(project) = self.project.upgrade() else {
             return div().track_focus(&self.focus_handle(cx));
         };
@@ -4112,13 +4230,16 @@ impl Render for Pane {
                     cx.propagate();
                 }
             }))
-            .when(self.active_item().is_some() && display_tab_bar, |pane| {
-                pane.child((self.render_tab_bar.clone())(self, window, cx))
-            })
+            .when(
+                self.active_item().is_some()
+                    && display_tab_bar
+                    && tab_bar_layout == TabBarLayout::Horizontal,
+                |pane| pane.child((self.render_tab_bar.clone())(self, window, cx)),
+            )
             .child({
                 let has_worktrees = project.read(cx).visible_worktrees(cx).next().is_some();
                 // main content
-                div()
+                let content = div()
                     .flex_1()
                     .relative()
                     .group("")
@@ -4159,7 +4280,7 @@ impl Render for Pane {
                                     let workspace = self.workspace.clone();
                                     self.welcome_page = Some(cx.new(|cx| {
                                         crate::welcome::WelcomePage::new(
-                                            workspace, true, window, cx,
+                                            workspace, !MINIMAL_UI, window, cx,
                                         )
                                     }));
                                 }
@@ -4215,7 +4336,16 @@ impl Render for Pane {
                                     }
                                 }
                             }),
-                    )
+                    );
+                if use_vertical_tabs {
+                    h_flex()
+                        .size_full()
+                        .child(self.render_vertical_tab_bar(window, cx))
+                        .child(content)
+                        .into_any_element()
+                } else {
+                    content.into_any_element()
+                }
             })
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
@@ -7281,7 +7411,13 @@ mod tests {
 
     fn init_test(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            let settings_store = SettingsStore::test(cx);
+            let mut settings_store = SettingsStore::test(cx);
+            settings_store.update_user_settings(cx, |settings| {
+                settings
+                    .tab_bar
+                    .get_or_insert_default()
+                    .layout = Some(TabBarLayout::Horizontal);
+            });
             cx.set_global(settings_store);
             theme::init(LoadThemes::JustBase, cx);
         });

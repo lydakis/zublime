@@ -21,6 +21,7 @@ language.workspace = true
 project.workspace = true
 serde_json.workspace = true
 serde_json_lenient.workspace = true
+settings.workspace = true
 theme.workspace = true
 title_bar.workspace = true
 ui.workspace = true

@@ -25,7 +25,7 @@
   // 4. "None"
   // 5. "SublimeText"
   // 6. "TextMate"
-  "base_keymap": "VSCode",
+  "base_keymap": "SublimeText",
   // Features that can be globally enabled or disabled
   "features": {
     // Which edit prediction provider to use.
@@ -423,13 +423,13 @@
   // Toolbar related settings
   "toolbar": {
     // Whether to show breadcrumbs.
-    "breadcrumbs": true,
+    "breadcrumbs": false,
     // Whether to show quick action buttons.
-    "quick_actions": true,
+    "quick_actions": false,
     // Whether to show the Selections menu in the editor toolbar.
-    "selections_menu": true,
+    "selections_menu": false,
     // Whether to show agent review buttons in the editor toolbar.
-    "agent_review": true,
+    "agent_review": false,
     // Whether to show code action buttons in the editor toolbar.
     "code_actions": false,
   },
@@ -440,17 +440,17 @@
     // Whether to show the branch icon beside branch switcher in the titlebar.
     "show_branch_icon": false,
     // Whether to show the branch name button in the titlebar.
-    "show_branch_name": true,
+    "show_branch_name": false,
     // Whether to show the project host and name in the titlebar.
-    "show_project_items": true,
+    "show_project_items": false,
     // Whether to show onboarding banners in the titlebar.
-    "show_onboarding_banner": true,
+    "show_onboarding_banner": false,
     // Whether to show user picture in the titlebar.
-    "show_user_picture": true,
+    "show_user_picture": false,
     // Whether to show the user menu in the titlebar.
-    "show_user_menu": true,
+    "show_user_menu": false,
     // Whether to show the sign in button in the titlebar.
-    "show_sign_in": true,
+    "show_sign_in": false,
     // Whether to show the menus in the titlebar.
     "show_menus": false,
   },
@@ -1175,10 +1175,13 @@
   "tab_bar": {
     // Whether or not to show the tab bar in the editor
     "show": true,
+    // Layout of the tab bar.
+    // One of: ["horizontal", "vertical"]
+    "layout": "vertical",
     // Whether or not to show the navigation history buttons.
-    "show_nav_history_buttons": true,
+    "show_nav_history_buttons": false,
     // Whether or not to show the tab bar buttons.
-    "show_tab_bar_buttons": true,
+    "show_tab_bar_buttons": false,
   },
   // Settings related to the editor's tabs
   "tabs": {
@@ -1362,7 +1365,7 @@
   // Whether to disable all AI features in Zed.
   //
   // Default: false
-  "disable_ai": false,
+  "disable_ai": true,
   // Automatically update Zed. This setting may be ignored on Linux if
   // installed through a package manager.
   "auto_update": true,
@@ -1574,7 +1577,7 @@
     // Whether to show active line endings button in the status bar.
     "line_endings_button": false,
     // Control when to show the active encoding in the status bar.
-    "active_encoding_button": "non_utf8",
+    "active_encoding_button": "disabled",
   },
   // Settings specific to the terminal
   "terminal": {
@@ -2334,7 +2337,7 @@
   //   - `short`: "2 s, 15 l, 32 c"
   //   - `long`: "2 selections, 15 lines, 32 characters"
   // Default: long
-  "line_indicator_format": "long",
+  "line_indicator_format": "short",
   // Set a proxy to use. The proxy protocol is specified by the URI scheme.
   //
   // Supported URI scheme: `http`, `https`, `socks4`, `socks4a`, `socks5`,

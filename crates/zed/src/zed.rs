@@ -38,10 +38,8 @@ use gpui::{
     Task, TitlebarOptions, UpdateGlobal, WeakEntity, Window, WindowHandle, WindowKind,
     WindowOptions, actions, image_cache, point, px, retain_all,
 };
-use image_viewer::ImageInfo;
 use language::Capability;
 use language_onboarding::BasedPyrightBanner;
-use language_tools::lsp_button::{self, LspButton};
 use language_tools::lsp_log_view::LspLogToolbarItemView;
 use migrate::{MigrationBanner, MigrationEvent, MigrationNotification, MigrationType};
 use migrator::migrate_keymap;
@@ -63,9 +61,9 @@ use rope::Rope;
 use search::project_search::ProjectSearchBar;
 use settings::{
     BaseKeymap, DEFAULT_KEYMAP_PATH, InvalidSettingsError, KeybindSource, KeymapFile,
-    KeymapFileLoadResult, MigrationStatus, Settings, SettingsStore, VIM_KEYMAP_PATH,
-    initial_local_debug_tasks_content, initial_project_settings_content, initial_tasks_content,
-    update_settings_file,
+    KeymapFileLoadResult, MigrationStatus, Settings, SettingsStore, TabBarLayout,
+    VIM_KEYMAP_PATH, initial_local_debug_tasks_content, initial_project_settings_content,
+    initial_tasks_content, update_settings_file,
 };
 use std::time::Duration;
 use std::{
@@ -76,7 +74,7 @@ use std::{
 };
 use terminal_view::terminal_panel::{self, TerminalPanel};
 use theme::{ActiveTheme, GlobalTheme, SystemAppearance, ThemeRegistry, ThemeSettings};
-use ui::{PopoverMenuHandle, prelude::*};
+use ui::prelude::*;
 use util::markdown::MarkdownString;
 use util::rel_path::RelPath;
 use util::{ResultExt, asset_str};
@@ -87,7 +85,8 @@ use workspace::notifications::{
 };
 use workspace::utility_pane::utility_slot_for_dock_position;
 use workspace::{
-    AppState, NewFile, NewWindow, OpenLog, Panel, Toast, Workspace, WorkspaceSettings,
+    AppState, NewFile, NewWindow, OpenLog, Panel, TabBarSettings, Toast, Workspace,
+    WorkspaceSettings,
     create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
     open_new,
 };
@@ -99,6 +98,8 @@ use zed_actions::{
     OpenAccountSettings, OpenBrowser, OpenDocs, OpenServerSettings, OpenSettingsFile, OpenZedUrl,
     Quit,
 };
+
+const MINIMAL_UI: bool = true;
 
 actions!(
     zed,
@@ -127,6 +128,12 @@ actions!(
         ShowAll,
         /// Toggles fullscreen mode.
         ToggleFullScreen,
+        /// Switches to vertical tabs.
+        UseVerticalTabs,
+        /// Switches to horizontal tabs.
+        UseHorizontalTabs,
+        /// Cycles the tab layout between vertical and horizontal.
+        CycleTabLayout,
         /// Zooms the window.
         Zoom,
         /// Triggers a test panic for debugging.
@@ -158,6 +165,28 @@ pub fn init(cx: &mut App) {
     cx.on_action(quit);
 
     cx.on_action(|_: &RestoreBanner, cx| title_bar::restore_banner(cx));
+    cx.on_action(|_: &UseVerticalTabs, cx| {
+        let fs = <dyn Fs>::global(cx);
+        update_settings_file(fs, cx, move |settings, _| {
+            settings.tab_bar.get_or_insert_default().layout = Some(TabBarLayout::Vertical);
+        });
+    });
+    cx.on_action(|_: &UseHorizontalTabs, cx| {
+        let fs = <dyn Fs>::global(cx);
+        update_settings_file(fs, cx, move |settings, _| {
+            settings.tab_bar.get_or_insert_default().layout = Some(TabBarLayout::Horizontal);
+        });
+    });
+    cx.on_action(|_: &CycleTabLayout, cx| {
+        let fs = <dyn Fs>::global(cx);
+        let next_layout = match TabBarSettings::get_global(cx).layout {
+            TabBarLayout::Vertical => TabBarLayout::Horizontal,
+            TabBarLayout::Horizontal => TabBarLayout::Vertical,
+        };
+        update_settings_file(fs, cx, move |settings, _| {
+            settings.tab_bar.get_or_insert_default().layout = Some(next_layout);
+        });
+    });
     let flag = cx.wait_for_flag::<PanicFeatureFlag>();
     cx.spawn(async |cx| {
         if cx.update(|cx| ReleaseChannel::global(cx) == ReleaseChannel::Dev) || flag.await {
@@ -399,66 +428,16 @@ pub fn initialize_workspace(
         #[cfg(target_os = "windows")]
         unstable_version_notification(cx);
 
-        let edit_prediction_menu_handle = PopoverMenuHandle::default();
-        let edit_prediction_ui = cx.new(|cx| {
-            edit_prediction_ui::EditPredictionButton::new(
-                app_state.fs.clone(),
-                app_state.user_store.clone(),
-                edit_prediction_menu_handle.clone(),
-                app_state.client.clone(),
-                cx,
-            )
-        });
-        workspace.register_action({
-            move |_, _: &edit_prediction_ui::ToggleMenu, window, cx| {
-                edit_prediction_menu_handle.toggle(window, cx);
-            }
-        });
-
-        let search_button = cx.new(|_| search::search_status_button::SearchButton::new());
-        let diagnostic_summary =
-            cx.new(|cx| diagnostics::items::DiagnosticIndicator::new(workspace, cx));
-        let activity_indicator = activity_indicator::ActivityIndicator::new(
-            workspace,
-            workspace.project().read(cx).languages().clone(),
-            window,
-            cx,
-        );
-        let active_buffer_encoding =
-            cx.new(|_| encoding_selector::ActiveBufferEncoding::new(workspace));
-        let active_buffer_language =
-            cx.new(|_| language_selector::ActiveBufferLanguage::new(workspace));
-        let active_toolchain_language =
-            cx.new(|cx| toolchain_selector::ActiveToolchain::new(workspace, window, cx));
-        let vim_mode_indicator = cx.new(|cx| vim::ModeIndicator::new(window, cx));
-        let image_info = cx.new(|_cx| ImageInfo::new(workspace));
-
-        let lsp_button_menu_handle = PopoverMenuHandle::default();
-        let lsp_button =
-            cx.new(|cx| LspButton::new(workspace, lsp_button_menu_handle.clone(), window, cx));
-        workspace.register_action({
-            move |_, _: &lsp_button::ToggleMenu, window, cx| {
-                lsp_button_menu_handle.toggle(window, cx);
-            }
-        });
-
         let cursor_position =
             cx.new(|_| go_to_line::cursor_position::CursorPosition::new(workspace));
-        let line_ending_indicator =
-            cx.new(|_| line_ending_selector::LineEndingIndicator::default());
+        let active_buffer_language =
+            cx.new(|_| language_selector::ActiveBufferLanguage::new(workspace));
+        let active_buffer_tab_size =
+            cx.new(|_| language_selector::ActiveBufferTabSize::new(workspace));
         workspace.status_bar().update(cx, |status_bar, cx| {
-            status_bar.add_left_item(search_button, window, cx);
-            status_bar.add_left_item(lsp_button, window, cx);
-            status_bar.add_left_item(diagnostic_summary, window, cx);
-            status_bar.add_left_item(activity_indicator, window, cx);
-            status_bar.add_right_item(edit_prediction_ui, window, cx);
-            status_bar.add_right_item(active_buffer_encoding, window, cx);
             status_bar.add_right_item(active_buffer_language, window, cx);
-            status_bar.add_right_item(active_toolchain_language, window, cx);
-            status_bar.add_right_item(line_ending_indicator, window, cx);
-            status_bar.add_right_item(vim_mode_indicator, window, cx);
+            status_bar.add_right_item(active_buffer_tab_size, window, cx);
             status_bar.add_right_item(cursor_position, window, cx);
-            status_bar.add_right_item(image_info, window, cx);
         });
 
         let handle = cx.entity().downgrade();
@@ -642,6 +621,11 @@ fn initialize_panels(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    if MINIMAL_UI {
+        let _ = prompt_builder;
+        let _ = (window, cx);
+        return;
+    }
     cx.spawn_in(window, async move |workspace_handle, cx| {
         let project_panel = ProjectPanel::load(workspace_handle.clone(), cx.clone());
         let outline_panel = OutlinePanel::load(workspace_handle.clone(), cx.clone());

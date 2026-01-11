@@ -37,7 +37,7 @@ use remote::RemoteConnectionOptions;
 use settings::{Settings, SettingsLocation};
 use std::sync::Arc;
 use theme::ActiveTheme;
-use title_bar_settings::TitleBarSettings;
+pub use title_bar_settings::TitleBarSettings;
 use ui::{
     Avatar, ButtonLike, Chip, ContextMenu, IconWithIndicator, Indicator, PopoverMenu,
     PopoverMenuHandle, TintColor, Tooltip, prelude::*,
@@ -141,7 +141,6 @@ pub struct TitleBar {
 impl Render for TitleBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title_bar_settings = *TitleBarSettings::get_global(cx);
-
         let show_menus = show_menus(cx);
 
         let mut children = Vec::new();
@@ -222,7 +221,7 @@ impl Render for TitleBar {
                 );
             });
 
-            let height = PlatformTitleBar::height(window);
+        let height = PlatformTitleBar::height(window);
             let title_bar_color = self.platform_titlebar.update(cx, |platform_titlebar, cx| {
                 platform_titlebar.title_bar_color(window, cx)
             });
@@ -234,7 +233,7 @@ impl Render for TitleBar {
                     h_flex()
                         .bg(title_bar_color)
                         .h(height)
-                        .pl_2()
+                        .map(|bar| bar.pl_2().pr_2())
                         .justify_between()
                         .w_full()
                         .children(children),

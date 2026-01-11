@@ -53,7 +53,10 @@ pub use ::settings::{
 };
 
 /// Defines window border radius for platforms that use client side decorations.
-pub const CLIENT_SIDE_DECORATION_ROUNDING: Pixels = px(10.0);
+#[cfg(target_os = "macos")]
+pub const CLIENT_SIDE_DECORATION_ROUNDING: Pixels = px(16.0);
+#[cfg(not(target_os = "macos"))]
+pub const CLIENT_SIDE_DECORATION_ROUNDING: Pixels = px(12.0);
 /// Defines window shadow size for platforms that use client side decorations.
 pub const CLIENT_SIDE_DECORATION_SHADOW: Pixels = px(10.0);
 

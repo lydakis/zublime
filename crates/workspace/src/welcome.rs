@@ -1,8 +1,7 @@
 use crate::{
-    NewFile, Open, PathList, SerializedWorkspaceLocation, WORKSPACE_DB, Workspace, WorkspaceId,
+    NewFile, OpenFiles, PathList, SerializedWorkspaceLocation, WORKSPACE_DB, Workspace, WorkspaceId,
     item::{Item, ItemEvent},
 };
-use git::Clone as GitClone;
 use gpui::WeakEntity;
 use gpui::{
     Action, App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -11,9 +10,9 @@ use gpui::{
 use menu::{SelectNext, SelectPrevious};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use ui::{ButtonLike, Divider, DividerColor, KeyBinding, Vector, VectorName, prelude::*};
+use ui::{ButtonLike, Divider, DividerColor, KeyBinding, prelude::*};
 use util::ResultExt;
-use zed_actions::{Extensions, OpenOnboarding, OpenSettings, agent, command_palette};
+use zed_actions::{OpenSettings, command_palette};
 
 #[derive(PartialEq, Clone, Debug, Deserialize, Serialize, JsonSchema, Action)]
 #[action(namespace = welcome)]
@@ -25,7 +24,7 @@ pub struct OpenRecentProject {
 actions!(
     zed,
     [
-        /// Show the Zed welcome screen
+        /// Show the Zublime welcome screen
         ShowWelcome
     ]
 );
@@ -136,7 +135,7 @@ impl SectionEntry {
     }
 }
 
-const CONTENT: (Section<4>, Section<3>) = (
+const CONTENT: (Section<3>, Section<1>) = (
     Section {
         title: "Get Started",
         entries: [
@@ -146,14 +145,9 @@ const CONTENT: (Section<4>, Section<3>) = (
                 action: &NewFile,
             },
             SectionEntry {
-                icon: IconName::FolderOpen,
-                title: "Open Project",
-                action: &Open,
-            },
-            SectionEntry {
-                icon: IconName::CloudDownload,
-                title: "Clone Repository",
-                action: &GitClone,
+                icon: IconName::File,
+                title: "Open File",
+                action: &OpenFiles,
             },
             SectionEntry {
                 icon: IconName::ListCollapse,
@@ -169,19 +163,6 @@ const CONTENT: (Section<4>, Section<3>) = (
                 icon: IconName::Settings,
                 title: "Open Settings",
                 action: &OpenSettings,
-            },
-            SectionEntry {
-                icon: IconName::ZedAssistant,
-                title: "View AI Settings",
-                action: &agent::OpenSettings,
-            },
-            SectionEntry {
-                icon: IconName::Blocks,
-                title: "Explore Extensions",
-                action: &Extensions {
-                    category_filter: None,
-                    id: None,
-                },
             },
         ],
     },
@@ -334,7 +315,6 @@ impl Render for WelcomePage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (first_section, second_section) = CONTENT;
         let first_section_entries = first_section.entries.len();
-        let last_index = first_section_entries + second_section.entries.len();
 
         let recent_projects = self
             .recent_workspaces
@@ -356,9 +336,9 @@ impl Render for WelcomePage {
         };
 
         let welcome_label = if self.fallback_to_recent_projects {
-            "Welcome back to Zed"
+            "Welcome back to Zublime"
         } else {
-            "Welcome to Zed"
+            "Welcome to Zublime"
         };
 
         h_flex()
@@ -386,39 +366,21 @@ impl Render for WelcomePage {
                             .gap_6()
                             .overflow_x_hidden()
                             .child(
-                                h_flex()
+                                v_flex()
                                     .w_full()
-                                    .justify_center()
+                                    .items_center()
                                     .mb_4()
-                                    .gap_4()
-                                    .child(Vector::square(VectorName::ZedLogo, rems_from_px(45.)))
+                                    .gap_1()
+                                    .child(Headline::new(welcome_label))
                                     .child(
-                                        v_flex().child(Headline::new(welcome_label)).child(
-                                            Label::new("The editor for what's next")
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted)
-                                                .italic(),
-                                        ),
+                                        Label::new("A fast, minimal editor for quick edits")
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
                                     ),
                             )
                             .child(first_section.render(Default::default(), &self.focus_handle, cx))
                             .child(second_section)
-                            .when(!self.fallback_to_recent_projects, |this| {
-                                this.child(
-                                    v_flex().gap_1().child(Divider::horizontal()).child(
-                                        Button::new("welcome-exit", "Return to Onboarding")
-                                            .tab_index(last_index as isize)
-                                            .full_width()
-                                            .label_size(LabelSize::XSmall)
-                                            .on_click(|_, window, cx| {
-                                                window.dispatch_action(
-                                                    OpenOnboarding.boxed_clone(),
-                                                    cx,
-                                                );
-                                            }),
-                                    ),
-                                )
-                            }),
+                            ,
                     ),
             )
     }

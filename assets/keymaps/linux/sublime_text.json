@@ -14,6 +14,7 @@
       "ctrl-7": ["workspace::ActivatePane", 6],
       "ctrl-8": ["workspace::ActivatePane", 7],
       "ctrl-9": ["workspace::ActivatePane", 8],
+      "ctrl-alt-shift-t": "zed::CycleTabLayout",
       "ctrl-!": ["workspace::MoveItemToPane", { "destination": 0, "focus": true }],
       "ctrl-@": ["workspace::MoveItemToPane", { "destination": 1 }],
       "ctrl-#": ["workspace::MoveItemToPane", { "destination": 2 }],

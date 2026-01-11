@@ -680,7 +680,7 @@ impl ActivityIndicator {
                             .with_rotate_animation(3)
                             .into_any_element(),
                     ),
-                    message: "Checking for Zed updates…".to_string(),
+                    message: "Checking for Zublime updates…".to_string(),
                     on_click: Some(Arc::new(|this, window, cx| {
                         this.dismiss_message(&DismissMessage, window, cx)
                     })),
@@ -692,7 +692,7 @@ impl ActivityIndicator {
                             .size(IconSize::Small)
                             .into_any_element(),
                     ),
-                    message: "Downloading Zed update…".to_string(),
+                    message: "Downloading Zublime update…".to_string(),
                     on_click: Some(Arc::new(|this, window, cx| {
                         this.dismiss_message(&DismissMessage, window, cx)
                     })),
@@ -705,7 +705,7 @@ impl ActivityIndicator {
                             .with_rotate_animation(3)
                             .into_any_element(),
                     ),
-                    message: "Installing Zed update…".to_string(),
+                    message: "Installing Zublime update…".to_string(),
                     on_click: Some(Arc::new(|this, window, cx| {
                         this.dismiss_message(&DismissMessage, window, cx)
                     })),
@@ -713,7 +713,7 @@ impl ActivityIndicator {
                 }),
                 AutoUpdateStatus::Updated { version } => Some(Content {
                     icon: None,
-                    message: "Click to restart and update Zed".to_string(),
+                    message: "Click to restart and update Zublime".to_string(),
                     on_click: Some(Arc::new(move |_, _, cx| workspace::reload(cx))),
                     tooltip_message: Some(Self::version_tooltip_message(version)),
                 }),
@@ -723,7 +723,7 @@ impl ActivityIndicator {
                             .size(IconSize::Small)
                             .into_any_element(),
                     ),
-                    message: "Failed to update Zed".to_string(),
+                    message: "Failed to update Zublime".to_string(),
                     on_click: Some(Arc::new(|this, window, cx| {
                         window.dispatch_action(Box::new(workspace::OpenLog), cx);
                         this.dismiss_message(&DismissMessage, window, cx);

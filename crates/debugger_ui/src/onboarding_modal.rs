@@ -128,7 +128,7 @@ impl Render for DebuggerOnboardingModal {
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     )
-                    .child(Headline::new("Zed's Debugger").size(HeadlineSize::Large)),
+                    .child(Headline::new("Zublime's Debugger").size(HeadlineSize::Large)),
             )
             .child(h_flex().absolute().top_2().right_2().child(
                 IconButton::new("cancel", IconName::Close).on_click(cx.listener(

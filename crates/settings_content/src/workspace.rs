@@ -73,6 +73,28 @@ pub struct WorkspaceSettingsContent {
     ///
     /// Default: true
     pub use_system_path_prompts: Option<bool>,
+    /// Whether selecting a folder in the Open dialog should open files recursively.
+    ///
+    /// Default: false
+    pub open_folders_recursively: Option<bool>,
+    /// Maximum number of files to open when expanding folders in the Open dialog.
+    /// Set to 0 to disable the limit.
+    ///
+    /// Default: 200
+    pub open_folders_max_files: Option<usize>,
+    /// Prompt when expanding folders would open more than this many files.
+    /// Set to 0 to disable prompting.
+    ///
+    /// Default: 100
+    pub open_folders_prompt_threshold: Option<usize>,
+    /// Folder names to skip when expanding folders in the Open dialog.
+    ///
+    /// Default: [\".git\", \"node_modules\", \"target\", \"dist\", \"build\", \"out\"]
+    pub open_folders_ignore: Option<Vec<String>>,
+    /// Whether to include hidden files when expanding folders in the Open dialog.
+    ///
+    /// Default: false
+    pub open_folders_include_hidden: Option<bool>,
     /// Whether to use the system provided prompts.
     /// When set to false, Zed will use the built-in prompts.
     /// Note that this setting has no effect on Linux, where Zed will always

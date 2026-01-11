@@ -198,6 +198,18 @@
   // Whether to use the system provided dialogs for Open and Save As.
   // When set to false, Zed will use the built-in keyboard-first pickers.
   "use_system_path_prompts": true,
+  // Whether selecting a folder in the Open dialog should open files recursively.
+  "open_folders_recursively": false,
+  // Maximum number of files to open when expanding folders in the Open dialog.
+  // Set to 0 to disable the limit.
+  "open_folders_max_files": 200,
+  // Prompt when expanding folders would open more than this many files.
+  // Set to 0 to disable prompting.
+  "open_folders_prompt_threshold": 100,
+  // Folder names to skip when expanding folders in the Open dialog.
+  "open_folders_ignore": [".git", "node_modules", "target", "dist", "build", "out"],
+  // Whether to include hidden files when expanding folders in the Open dialog.
+  "open_folders_include_hidden": false,
   // Whether to use the system provided dialogs for prompts, such as confirmation
   // prompts.
   // When set to false, Zed will use its built-in prompts. Note that on Linux,

@@ -47,7 +47,8 @@ use gpui::{
     CursorStyle, Decorations, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle,
     Focusable, Global, HitboxBehavior, Hsla, KeyContext, Keystroke, ManagedView, MouseButton,
     PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, Subscription,
-    SystemWindowTabController, Task, Tiling, WeakEntity, WindowBounds, WindowHandle, WindowId,
+    PromptButton, SystemWindowTabController, Task, Tiling, WeakEntity, WindowBounds, WindowHandle,
+    WindowId,
     WindowOptions, actions, canvas, point, relative, size, transparent_black,
 };
 pub use history_manager::*;
@@ -129,8 +130,8 @@ use util::{
 };
 use uuid::Uuid;
 pub use workspace_settings::{
-    AutosaveSetting, BottomDockLayout, RestoreOnStartupBehavior, StatusBarSettings, TabBarSettings,
-    WorkspaceSettings,
+    AutosaveSetting, BottomDockLayout, RestoreOnStartupBehavior, StatusBarSettings, TabBarLayout,
+    TabBarSettings, WorkspaceSettings,
 };
 use zed_actions::{Spawn, feedback::FileBugReport};
 
@@ -249,6 +250,8 @@ actions!(
         Open,
         /// Opens multiple files.
         OpenFiles,
+        /// Opens files and expands selected folders recursively.
+        OpenFilesRecursively,
         /// Opens the current location in terminal.
         OpenInTerminal,
         /// Opens the component preview.
@@ -582,14 +585,304 @@ impl From<WorkspaceId> for i64 {
     }
 }
 
-fn prompt_and_open_paths(app_state: Arc<AppState>, options: PathPromptOptions, cx: &mut App) {
+#[derive(Clone)]
+pub struct OpenFolderExpansionSettings {
+    pub recursive: bool,
+    pub max_files: usize,
+    pub prompt_threshold: usize,
+    pub ignore_names: HashSet<String>,
+    pub include_hidden: bool,
+}
+
+impl OpenFolderExpansionSettings {
+    pub fn from_workspace_settings(
+        settings: &WorkspaceSettings,
+        recursive_override: Option<bool>,
+    ) -> Self {
+        Self {
+            recursive: recursive_override.unwrap_or(settings.open_folders_recursively),
+            max_files: settings.open_folders_max_files,
+            prompt_threshold: settings.open_folders_prompt_threshold,
+            ignore_names: settings
+                .open_folders_ignore
+                .iter()
+                .cloned()
+                .collect(),
+            include_hidden: settings.open_folders_include_hidden,
+        }
+    }
+
+    fn max_files_limit(&self) -> Option<usize> {
+        if self.max_files == 0 {
+            None
+        } else {
+            Some(self.max_files)
+        }
+    }
+}
+
+#[derive(Default)]
+struct ExpandedOpenPaths {
+    files: Vec<PathBuf>,
+    capped: bool,
+}
+
+fn is_hidden_name(name: &str) -> bool {
+    name.starts_with('.')
+}
+
+async fn collect_open_files(
+    paths: Vec<PathBuf>,
+    fs: Arc<dyn fs::Fs>,
+    settings: &OpenFolderExpansionSettings,
+    limit: Option<usize>,
+) -> ExpandedOpenPaths {
+    let mut expanded = ExpandedOpenPaths::default();
+    let mut seen = HashSet::default();
+    let mut expanded_count = 0usize;
+    let mut pending_dirs: VecDeque<(PathBuf, bool)> = VecDeque::new();
+
+    for path in paths {
+        if fs.is_dir(&path).await {
+            pending_dirs.push_back((path, true));
+        } else if fs.is_file(&path).await && seen.insert(path.clone()) {
+            expanded.files.push(path);
+        }
+    }
+
+    while let Some((dir, is_root)) = pending_dirs.pop_front() {
+        let mut entries = match fs.read_dir(&dir).await {
+            Ok(entries) => entries,
+            Err(err) => {
+                util::log_err(&err);
+                continue;
+            }
+        };
+
+        while let Some(entry) = entries.next().await {
+            let entry_path = match entry {
+                Ok(path) => path,
+                Err(err) => {
+                    util::log_err(&err);
+                    continue;
+                }
+            };
+
+            let file_name = entry_path
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .unwrap_or_default();
+
+            if !settings.include_hidden && is_hidden_name(&file_name) {
+                continue;
+            }
+
+            let metadata = match fs.metadata(&entry_path).await {
+                Ok(Some(metadata)) => metadata,
+                Ok(None) => continue,
+                Err(err) => {
+                    util::log_err(&err);
+                    continue;
+                }
+            };
+
+            if metadata.is_dir {
+                if !is_root && settings.ignore_names.contains(file_name.as_ref()) {
+                    continue;
+                }
+                if settings.recursive {
+                    pending_dirs.push_back((entry_path, false));
+                }
+                continue;
+            }
+
+            if seen.insert(entry_path.clone()) {
+                if let Some(limit) = limit {
+                    if expanded_count >= limit {
+                        expanded.capped = true;
+                        return expanded;
+                    }
+                }
+                expanded_count += 1;
+                expanded.files.push(entry_path);
+            }
+        }
+    }
+
+    expanded
+}
+
+pub enum OpenDialogSelection {
+    Tabs(Vec<PathBuf>),
+    Workspace(Vec<PathBuf>),
+    Cancelled,
+}
+
+async fn selection_contains_directory(paths: &[PathBuf], fs: &Arc<dyn fs::Fs>) -> bool {
+    for path in paths {
+        if fs.is_dir(path).await {
+            return true;
+        }
+    }
+    false
+}
+
+pub async fn resolve_open_dialog_selection(
+    paths: Vec<PathBuf>,
+    fs: Arc<dyn fs::Fs>,
+    settings: OpenFolderExpansionSettings,
+    prompt_window: Option<WindowHandle<Workspace>>,
+    allow_workspace: bool,
+    cx: &mut AsyncApp,
+) -> OpenDialogSelection {
+    let has_directory = selection_contains_directory(&paths, &fs).await;
+    if allow_workspace && has_directory {
+        if let Some(prompt_window) = prompt_window {
+            let detail =
+                "Open the folder as tabs or open it as a workspace?";
+            let answer = match prompt_window.update(cx, |_, window, cx| {
+                window.prompt(
+                    PromptLevel::Warning,
+                    "Open Folder",
+                    Some(detail),
+                    &[
+                        PromptButton::ok("Open as Tabs"),
+                        PromptButton::new("Open as Workspace"),
+                        PromptButton::cancel("Cancel"),
+                    ],
+                    cx,
+                )
+            }) {
+                Ok(task) => task.await.ok(),
+                Err(_) => None,
+            };
+
+            match answer {
+                Some(0) => {}
+                Some(1) => return OpenDialogSelection::Workspace(paths),
+                _ => return OpenDialogSelection::Cancelled,
+            }
+        }
+    }
+
+    let limit = settings.max_files_limit();
+    let mut expanded = collect_open_files(paths.clone(), fs.clone(), &settings, limit).await;
+    let total_files = expanded.files.len();
+    let should_prompt = expanded.capped
+        || (settings.prompt_threshold > 0 && total_files > settings.prompt_threshold);
+
+    if !should_prompt {
+        return OpenDialogSelection::Tabs(expanded.files);
+    }
+
+    let Some(prompt_window) = prompt_window else {
+        return OpenDialogSelection::Tabs(expanded.files);
+    };
+
+    if expanded.capped {
+        let max_files = settings.max_files;
+        let detail = format!("This selection contains more than {max_files} files.");
+        let answer = match prompt_window.update(cx, |_, window, cx| {
+            window.prompt(
+                PromptLevel::Warning,
+                "Open many files?",
+                Some(&detail),
+                &[
+                    PromptButton::ok(format!("Open First {max_files}")),
+                    PromptButton::new("Open All"),
+                    PromptButton::cancel("Cancel"),
+                ],
+                cx,
+            )
+        }) {
+            Ok(task) => task.await.ok(),
+            Err(_) => None,
+        };
+
+        match answer {
+            Some(0) => OpenDialogSelection::Tabs(expanded.files),
+            Some(1) => {
+                expanded = collect_open_files(paths, fs, &settings, None).await;
+                OpenDialogSelection::Tabs(expanded.files)
+            }
+            _ => OpenDialogSelection::Cancelled,
+        }
+    } else {
+        let detail = format!("This will open {total_files} files in tabs.");
+        let answer = match prompt_window.update(cx, |_, window, cx| {
+            window.prompt(
+                PromptLevel::Warning,
+                "Open many files?",
+                Some(&detail),
+                &[PromptButton::ok("Open Files"), PromptButton::cancel("Cancel")],
+                cx,
+            )
+        }) {
+            Ok(task) => task.await.ok(),
+            Err(_) => None,
+        };
+        if answer == Some(0) {
+            OpenDialogSelection::Tabs(expanded.files)
+        } else {
+            OpenDialogSelection::Cancelled
+        }
+    }
+}
+
+fn prompt_and_open_paths(
+    app_state: Arc<AppState>,
+    options: PathPromptOptions,
+    recursive_override: Option<bool>,
+    allow_workspace: bool,
+    cx: &mut App,
+) {
+    let allow_directories = options.directories;
+    let settings = OpenFolderExpansionSettings::from_workspace_settings(
+        &WorkspaceSettings::get_global(cx),
+        recursive_override,
+    );
+    let fs = app_state.fs.clone();
+    let prompt_window = cx.active_window().and_then(|window| window.downcast::<Workspace>());
     let paths = cx.prompt_for_paths(options);
     cx.spawn(
         async move |cx| match paths.await.anyhow().and_then(|res| res) {
             Ok(Some(paths)) => {
-                cx.update(|cx| {
-                    open_paths(&paths, app_state, OpenOptions::default(), cx).detach_and_log_err(cx)
-                });
+                if !allow_directories {
+                    cx.update(|cx| {
+                        open_paths(&paths, app_state, OpenOptions::default(), cx)
+                            .detach_and_log_err(cx)
+                    });
+                    return;
+                }
+
+                let selection = resolve_open_dialog_selection(
+                    paths,
+                    fs,
+                    settings,
+                    prompt_window,
+                    allow_workspace,
+                    cx,
+                )
+                .await;
+
+                match selection {
+                    OpenDialogSelection::Tabs(paths) => {
+                        if paths.is_empty() {
+                            return;
+                        }
+                        cx.update(|cx| {
+                            open_paths(&paths, app_state, OpenOptions::default(), cx)
+                                .detach_and_log_err(cx)
+                        });
+                    }
+                    OpenDialogSelection::Workspace(paths) => {
+                        cx.update(|cx| {
+                            open_paths(&paths, app_state, OpenOptions::default(), cx)
+                                .detach_and_log_err(cx)
+                        });
+                    }
+                    OpenDialogSelection::Cancelled => {}
+                }
             }
             Ok(None) => {}
             Err(err) => {
@@ -632,6 +925,8 @@ pub fn init(app_state: Arc<AppState>, cx: &mut App) {
                             multiple: true,
                             prompt: None,
                         },
+                        None,
+                        true,
                         cx,
                     );
                 }
@@ -640,16 +935,36 @@ pub fn init(app_state: Arc<AppState>, cx: &mut App) {
         .on_action({
             let app_state = Arc::downgrade(&app_state);
             move |_: &OpenFiles, cx: &mut App| {
-                let directories = cx.can_select_mixed_files_and_dirs();
                 if let Some(app_state) = app_state.upgrade() {
                     prompt_and_open_paths(
                         app_state,
                         PathPromptOptions {
                             files: true,
-                            directories,
+                            directories: cx.can_select_mixed_files_and_dirs(),
                             multiple: true,
                             prompt: None,
                         },
+                        None,
+                        false,
+                        cx,
+                    );
+                }
+            }
+        })
+        .on_action({
+            let app_state = Arc::downgrade(&app_state);
+            move |_: &OpenFilesRecursively, cx: &mut App| {
+                if let Some(app_state) = app_state.upgrade() {
+                    prompt_and_open_paths(
+                        app_state,
+                        PathPromptOptions {
+                            files: true,
+                            directories: true,
+                            multiple: true,
+                            prompt: None,
+                        },
+                        Some(true),
+                        false,
                         cx,
                     );
                 }
@@ -8096,7 +8411,7 @@ pub fn join_channel(
                         let detail: SharedString = match err.error_code() {
                             ErrorCode::SignedOut => "Please sign in to continue.".into(),
                             ErrorCode::UpgradeRequired => concat!(
-                                "Your are running an unsupported version of Zed. ",
+                                "Your are running an unsupported version of Zublime. ",
                                 "Please update to continue."
                             )
                             .into(),

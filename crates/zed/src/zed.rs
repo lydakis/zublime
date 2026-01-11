@@ -488,7 +488,7 @@ fn unstable_version_notification(cx: &mut App) {
     struct WindowsNightly;
     show_app_notification(NotificationId::unique::<WindowsNightly>(), cx, |cx| {
         cx.new(|cx| {
-            MessageNotification::new("You're using an unstable version of Zed (Nightly)", cx)
+            MessageNotification::new("You're using an unstable version of Zublime (Nightly)", cx)
                 .primary_message("Download Stable")
                 .primary_icon_color(Color::Accent)
                 .primary_icon(IconName::Download)
@@ -587,7 +587,7 @@ fn show_software_emulation_warning_if_needed(
         };
         let message = format!(
             db::indoc! {r#"
-            Zed uses {} for rendering and requires a compatible GPU.
+            Zublime uses {} for rendering and requires a compatible GPU.
 
             Currently you are using a software emulated GPU ({}) which
             will result in awful performance.

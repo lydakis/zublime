@@ -32,6 +32,11 @@ pub struct WorkspaceSettings {
     pub resize_all_panels_in_dock: Vec<DockPosition>,
     pub close_on_file_delete: bool,
     pub use_system_window_tabs: bool,
+    pub open_folders_recursively: bool,
+    pub open_folders_max_files: usize,
+    pub open_folders_prompt_threshold: usize,
+    pub open_folders_ignore: Vec<String>,
+    pub open_folders_include_hidden: bool,
     pub zoomed_padding: bool,
     pub window_decorations: settings::WindowDecorations,
 }
@@ -109,6 +114,11 @@ impl Settings for WorkspaceSettings {
                 .collect(),
             close_on_file_delete: workspace.close_on_file_delete.unwrap(),
             use_system_window_tabs: workspace.use_system_window_tabs.unwrap(),
+            open_folders_recursively: workspace.open_folders_recursively.unwrap(),
+            open_folders_max_files: workspace.open_folders_max_files.unwrap(),
+            open_folders_prompt_threshold: workspace.open_folders_prompt_threshold.unwrap(),
+            open_folders_ignore: workspace.open_folders_ignore.clone().unwrap(),
+            open_folders_include_hidden: workspace.open_folders_include_hidden.unwrap(),
             zoomed_padding: workspace.zoomed_padding.unwrap(),
             window_decorations: workspace.window_decorations.unwrap(),
         }

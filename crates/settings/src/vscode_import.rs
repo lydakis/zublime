@@ -642,6 +642,7 @@ impl VsCodeSettings {
                 "single" | "none" => Some(false),
                 _ => None,
             }),
+            layout: None,
             show_nav_history_buttons: None,
             show_tab_bar_buttons: self
                 .read_str("workbench.editor.editorActionsLocation")
@@ -852,6 +853,11 @@ impl VsCodeSettings {
                 None
             },
             on_last_window_closed: None,
+            open_folders_recursively: None,
+            open_folders_max_files: None,
+            open_folders_prompt_threshold: None,
+            open_folders_ignore: None,
+            open_folders_include_hidden: None,
             pane_split_direction_horizontal: None,
             pane_split_direction_vertical: None,
             resize_all_panels_in_dock: None,

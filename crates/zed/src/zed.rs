@@ -840,13 +840,64 @@ fn register_actions(
                 window,
                 cx,
             );
+            let fs = workspace.app_state().fs.clone();
+            let settings = workspace::OpenFolderExpansionSettings::from_workspace_settings(
+                &WorkspaceSettings::get_global(cx),
+                None,
+            );
+            let prompt_window = window.window_handle().downcast::<Workspace>();
 
             cx.spawn_in(window, async move |this, cx| {
                 let Some(paths) = paths.await.log_err().flatten() else {
                     return;
                 };
 
-                if let Some(task) = this
+                if MINIMAL_UI {
+                    match workspace::resolve_open_dialog_selection(
+                        paths,
+                        fs,
+                        settings,
+                        prompt_window,
+                        true,
+                        cx,
+                    )
+                    .await
+                    {
+                        workspace::OpenDialogSelection::Tabs(paths) => {
+                            if paths.is_empty() {
+                                return;
+                            }
+
+                            if let Some(results) = this
+                                .update_in(cx, |this, window, cx| {
+                                    this.open_paths(
+                                        paths,
+                                        workspace::OpenOptions::default(),
+                                        None,
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .log_err()
+                            {
+                                for result in results.await.into_iter().flatten() {
+                                    result.log_err();
+                                }
+                            }
+                        }
+                        workspace::OpenDialogSelection::Workspace(paths) => {
+                            if let Some(task) = this
+                                .update_in(cx, |this, window, cx| {
+                                    this.open_workspace_for_paths(false, paths, window, cx)
+                                })
+                                .log_err()
+                            {
+                                task.await.log_err();
+                            }
+                        }
+                        workspace::OpenDialogSelection::Cancelled => {}
+                    }
+                } else if let Some(task) = this
                     .update_in(cx, |this, window, cx| {
                         this.open_workspace_for_paths(false, paths, window, cx)
                     })

@@ -1831,7 +1831,7 @@ impl Render for KeymapEditor {
                                                         Some(ContextMenu::build(window, cx, |menu, _, _| {
                                                             menu.header("View Default...")
                                                                 .action(
-                                                                    "Zed Key Bindings",
+                                                                    "Zublime Key Bindings",
                                                                     zed_actions::OpenDefaultKeymap
                                                                         .boxed_clone(),
                                                                 )

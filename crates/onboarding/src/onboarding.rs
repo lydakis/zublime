@@ -13,8 +13,8 @@ use serde::Deserialize;
 use settings::{SettingsStore, VsCodeSettingsSource};
 use std::sync::Arc;
 use ui::{
-    Divider, KeyBinding, ParentElement as _, StatefulInteractiveElement, Vector, VectorName,
-    WithScrollbar as _, prelude::*, rems_from_px,
+    Divider, KeyBinding, ParentElement as _, StatefulInteractiveElement, WithScrollbar as _,
+    prelude::*, rems_from_px,
 };
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
@@ -305,21 +305,16 @@ impl Render for Onboarding {
                                     .gap_4()
                                     .justify_between()
                                     .child(
-                                        h_flex()
-                                            .gap_4()
-                                            .child(Vector::square(VectorName::ZedLogo, rems(2.5)))
+                                        v_flex()
+                                            .gap_0p5()
                                             .child(
-                                                v_flex()
-                                                    .child(
-                                                        Headline::new("Welcome to Zed")
-                                                            .size(HeadlineSize::Small),
-                                                    )
-                                                    .child(
-                                                        Label::new("The editor for what's next")
-                                                            .color(Color::Muted)
-                                                            .size(LabelSize::Small)
-                                                            .italic(),
-                                                    ),
+                                                Headline::new("Welcome to Zublime")
+                                                    .size(HeadlineSize::Small),
+                                            )
+                                            .child(
+                                                Label::new("Minimal, fast, and focused")
+                                                    .color(Color::Muted)
+                                                    .size(LabelSize::Small),
                                             ),
                                     )
                                     .child({

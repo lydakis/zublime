@@ -38,11 +38,13 @@ pub struct StatusBar {
 
 impl Render for StatusBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let height = status_bar_height(window);
         h_flex()
             .w_full()
             .justify_between()
             .gap(DynamicSpacing::Base08.rems(cx))
-            .py(DynamicSpacing::Base04.rems(cx))
+            .h(height)
+            .items_center()
             .px(DynamicSpacing::Base06.rems(cx))
             .bg(cx.theme().colors().status_bar_background)
             .map(|el| match window.window_decorations() {
@@ -62,6 +64,24 @@ impl Render for StatusBar {
             .child(self.render_left_tools())
             .child(self.render_right_tools())
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn status_bar_height(window: &mut Window) -> Pixels {
+    if cfg!(target_os = "macos") {
+        let scale = 1.6;
+        let min = px(30.);
+        (scale * window.rem_size()).max(min)
+    } else {
+        let scale = 1.8;
+        let min = px(34.);
+        (scale * window.rem_size()).max(min)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn status_bar_height(_window: &mut Window) -> Pixels {
+    px(32.)
 }
 
 impl StatusBar {

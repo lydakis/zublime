@@ -1,6 +1,8 @@
 mod active_buffer_language;
+mod active_buffer_tab_size;
 
 pub use active_buffer_language::ActiveBufferLanguage;
+pub use active_buffer_tab_size::ActiveBufferTabSize;
 use anyhow::Context as _;
 use editor::Editor;
 use fuzzy::{StringMatch, StringMatchCandidate, match_strings};

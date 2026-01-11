@@ -42,7 +42,15 @@ impl PlatformTitleBar {
 
     #[cfg(not(target_os = "windows"))]
     pub fn height(window: &mut Window) -> Pixels {
-        (1.75 * window.rem_size()).max(px(34.))
+        if cfg!(target_os = "macos") {
+            let scale = 1.6;
+            let min = px(30.);
+            (scale * window.rem_size()).max(min)
+        } else {
+            let scale = 1.8;
+            let min = px(34.);
+            (scale * window.rem_size()).max(min)
+        }
     }
 
     #[cfg(target_os = "windows")]

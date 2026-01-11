@@ -6,7 +6,7 @@ use serde::Deserialize;
 pub use settings::{
     AutosaveSetting, BottomDockLayout, EncodingDisplayOptions, InactiveOpacity,
     PaneSplitDirectionHorizontal, PaneSplitDirectionVertical, RegisterSetting,
-    RestoreOnStartupBehavior, Settings,
+    RestoreOnStartupBehavior, Settings, TabBarLayout,
 };
 
 #[derive(RegisterSetting)]
@@ -58,6 +58,7 @@ pub struct ActivePanelModifiers {
 #[derive(Deserialize, RegisterSetting)]
 pub struct TabBarSettings {
     pub show: bool,
+    pub layout: TabBarLayout,
     pub show_nav_history_buttons: bool,
     pub show_tab_bar_buttons: bool,
     pub show_pinned_tabs_in_separate_row: bool,
@@ -120,6 +121,7 @@ impl Settings for TabBarSettings {
         let tab_bar = content.tab_bar.clone().unwrap();
         TabBarSettings {
             show: tab_bar.show.unwrap(),
+            layout: tab_bar.layout.unwrap(),
             show_nav_history_buttons: tab_bar.show_nav_history_buttons.unwrap(),
             show_tab_bar_buttons: tab_bar.show_tab_bar_buttons.unwrap(),
             show_pinned_tabs_in_separate_row: tab_bar.show_pinned_tabs_in_separate_row.unwrap(),

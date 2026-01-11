@@ -3683,6 +3683,19 @@ fn window_and_layout_page() -> SettingsPage {
                 files: USER,
             }),
             SettingsPageItem::SettingItem(SettingItem {
+                title: "Tab Bar Layout",
+                description: "Select a horizontal or vertical tab layout.",
+                field: Box::new(SettingField {
+                    json_path: Some("tab_bar.layout"),
+                    pick: |settings_content| settings_content.tab_bar.as_ref()?.layout.as_ref(),
+                    write: |settings_content, value| {
+                        settings_content.tab_bar.get_or_insert_default().layout = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
                 title: "Show Git Status In Tabs",
                 description: "Show the Git file status on a tab item.",
                 field: Box::new(SettingField {

@@ -74,7 +74,7 @@ impl FileDiffView {
                     )
                 });
 
-                let pane = workspace.active_pane();
+                let pane = workspace.active_pane().clone();
                 pane.update(cx, |pane, cx| {
                     pane.add_item(Box::new(diff_view.clone()), true, true, None, window, cx);
                 });
@@ -93,7 +93,7 @@ impl FileDiffView {
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Entity<Self>>> {
-        let pane = workspace.active_pane();
+        let pane = workspace.active_pane().clone();
         Self::open_buffers_in_pane(
             old_buffer,
             new_buffer,
@@ -125,7 +125,7 @@ impl FileDiffView {
 
             let buffer_diff = build_buffer_diff(&old_buffer, &new_buffer, languages, cx).await?;
 
-            workspace.update_in(cx, |workspace, window, cx| {
+            workspace.update_in(cx, |_workspace, window, cx| {
                 let workspace_handle = cx.entity();
                 let diff_view = cx.new(|cx| {
                     FileDiffView::new(
@@ -293,7 +293,7 @@ async fn build_buffer_diff(
 }
 
 impl FileDiffView {
-    fn primary_editor(&self, cx: &impl gpui::AppContext) -> Entity<Editor> {
+    fn primary_editor(&self, cx: &App) -> Entity<Editor> {
         self.editor.read(cx).primary_editor().clone()
     }
 

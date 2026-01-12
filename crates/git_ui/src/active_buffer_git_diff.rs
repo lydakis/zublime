@@ -1,8 +1,11 @@
+use anyhow::Result;
 use editor::Editor;
-use gpui::{Context, Entity, EntityId, Render, Styled, Subscription, WeakEntity, Window, div};
+use gpui::{
+    AppContext, Context, Entity, EntityId, Render, Styled, Subscription, WeakEntity, Window, div,
+};
 use language::{Buffer, Capability};
-use ui::{IconButton, IconButtonShape, IconName, IconSize, SharedString, Tooltip};
-use workspace::{Pane, StatusItemView, Workspace, item::ItemHandle};
+use ui::{IconButton, IconButtonShape, IconName, IconSize, SharedString, Tooltip, prelude::*};
+use workspace::{Pane, ProjectItem, StatusItemView, Workspace, item::ItemHandle};
 
 use crate::file_diff_view::FileDiffView;
 
@@ -35,7 +38,7 @@ impl ActiveBufferGitDiff {
             return;
         };
 
-        let Some((_, buffer, _)) = editor.active_excerpt(cx) else {
+        let Some((_, buffer, _)) = editor.read(cx).active_excerpt(cx) else {
             cx.notify();
             return;
         };
@@ -44,6 +47,7 @@ impl ActiveBufferGitDiff {
         let in_repo = workspace
             .read(cx)
             .project()
+            .read(cx)
             .git_store()
             .read(cx)
             .repository_and_path_for_buffer_id(buffer_id, cx)
@@ -76,11 +80,13 @@ impl Render for ActiveBufferGitDiff {
             return div().hidden();
         }
 
-        IconButton::new("status_git_diff", IconName::Diff)
-            .icon_size(IconSize::Small)
-            .shape(IconButtonShape::Square)
-            .tooltip(Tooltip::text("Open Git Diff (Alt for staged)"))
-            .on_click(cx.listener(Self::open_diff))
+        div().child(
+            IconButton::new("status_git_diff", IconName::Diff)
+                .icon_size(IconSize::Small)
+                .shape(IconButtonShape::Square)
+                .tooltip(Tooltip::text("Open Git Diff (Alt for staged)"))
+                .on_click(cx.listener(Self::open_diff)),
+        )
     }
 }
 
@@ -121,7 +127,7 @@ fn open_diff_for_editor(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let Some((_, buffer, _)) = editor.active_excerpt(cx) else {
+    let Some((_, buffer, _)) = editor.read(cx).active_excerpt(cx) else {
         return;
     };
     let buffer_id = buffer.read(cx).remote_id();
@@ -146,10 +152,10 @@ fn open_diff_for_editor(
     let workspace = cx.entity().downgrade();
     let pane = pane.downgrade();
     window
-        .spawn(cx, async move |cx| {
+        .spawn(cx, async move |cx| -> Result<()> {
             let diff = diff_task.await?;
             let base_text = diff
-                .read_with(cx, |diff, _| diff.base_text_string())
+                .read_with(cx, |diff, cx| diff.base_text_string(cx))
                 .unwrap_or_default();
             let language = buffer.read_with(cx, |buffer, _| buffer.language().cloned());
             let old_buffer = cx.new(|cx| {
@@ -199,7 +205,7 @@ pub fn toggle_active_buffer_git_diff(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let pane = workspace.active_pane();
+    let pane = workspace.active_pane().clone();
     let (active_item, active_index) = {
         let pane = pane.read(cx);
         (pane.active_item(), pane.active_item_index())

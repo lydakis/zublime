@@ -17,6 +17,7 @@ pub enum DiffBase {
 
 pub struct ActiveBufferGitDiff {
     workspace: WeakEntity<Workspace>,
+    project: WeakEntity<project::Project>,
     show_button: bool,
     _observe_active_editor: Option<Subscription>,
 }
@@ -25,6 +26,7 @@ impl ActiveBufferGitDiff {
     pub fn new(workspace: &Workspace) -> Self {
         Self {
             workspace: workspace.weak_handle(),
+            project: workspace.project().clone().downgrade(),
             show_button: false,
             _observe_active_editor: None,
         }
@@ -33,7 +35,7 @@ impl ActiveBufferGitDiff {
     fn update_for_editor(&mut self, editor: Entity<Editor>, _: &mut Window, cx: &mut Context<Self>) {
         self.show_button = false;
 
-        let Some(workspace) = self.workspace.upgrade() else {
+        let Some(project) = self.project.upgrade() else {
             cx.notify();
             return;
         };
@@ -44,9 +46,7 @@ impl ActiveBufferGitDiff {
         };
 
         let buffer_id = buffer.read(cx).remote_id();
-        let in_repo = workspace
-            .read(cx)
-            .project()
+        let in_repo = project
             .read(cx)
             .git_store()
             .read(cx)

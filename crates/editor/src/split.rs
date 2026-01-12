@@ -902,6 +902,31 @@ impl SplittableEditor {
         cx.notify();
     }
 
+    pub fn added_to_workspace(
+        &mut self,
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspace = workspace.weak_handle();
+        self.rhs_editor.update(cx, |rhs_editor, cx| {
+            rhs_editor.added_to_workspace(workspace, window, cx);
+        });
+        if let Some(lhs) = &self.lhs {
+            lhs.editor.update(cx, |lhs_editor, cx| {
+                lhs_editor.added_to_workspace(workspace, window, cx);
+            });
+        }
+    }
+
+    pub fn enable_split_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.split(&SplitDiff, window, cx);
+    }
+
+    pub fn disable_split_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.unsplit(&UnsplitDiff, window, cx);
+    }
+
     pub fn set_excerpts_for_path(
         &mut self,
         path: PathKey,

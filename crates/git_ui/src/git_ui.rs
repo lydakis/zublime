@@ -29,9 +29,14 @@ use ui::prelude::*;
 use workspace::{ModalView, Workspace, notifications::DetachAndPromptErr};
 use zed_actions;
 
-use crate::{git_panel::GitPanel, text_diff_view::TextDiffView};
+use crate::{
+    active_buffer_git_diff::{DiffBase, toggle_active_buffer_git_diff},
+    git_panel::GitPanel,
+    text_diff_view::TextDiffView,
+};
 
 mod askpass_modal;
+pub mod active_buffer_git_diff;
 pub mod branch_picker;
 mod commit_modal;
 pub mod commit_tooltip;
@@ -50,11 +55,17 @@ pub mod stash_picker;
 pub mod text_diff_view;
 pub mod worktree_picker;
 
+pub use active_buffer_git_diff::ActiveBufferGitDiff;
+
 actions!(
     git,
     [
         /// Resets the git onboarding state to show the tutorial again.
-        ResetOnboarding
+        ResetOnboarding,
+        /// Toggles a side-by-side diff for the active file (HEAD ↔ working tree).
+        ToggleActiveFileDiff,
+        /// Toggles a side-by-side diff for the active file (staged ↔ working tree).
+        ToggleActiveFileDiffStaged
     ]
 );
 
@@ -76,6 +87,12 @@ pub fn init(cx: &mut App) {
         branch_picker::register(workspace);
         worktree_picker::register(workspace);
         stash_picker::register(workspace);
+        workspace.register_action(|workspace, _: &ToggleActiveFileDiff, window, cx| {
+            toggle_active_buffer_git_diff(workspace, DiffBase::Head, window, cx);
+        });
+        workspace.register_action(|workspace, _: &ToggleActiveFileDiffStaged, window, cx| {
+            toggle_active_buffer_git_diff(workspace, DiffBase::Staged, window, cx);
+        });
 
         let project = workspace.project().read(cx);
         if project.is_read_only(cx) {

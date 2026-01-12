@@ -292,6 +292,14 @@ impl SplittableEditor {
         }
     }
 
+    pub fn enable_split_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.split(&SplitDiff, window, cx);
+    }
+
+    pub fn disable_split_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.unsplit(&UnsplitDiff, window, cx);
+    }
+
     pub fn set_excerpts_for_path(
         &mut self,
         path: PathKey,

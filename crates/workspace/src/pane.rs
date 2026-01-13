@@ -2680,10 +2680,22 @@ impl Pane {
         cx: &mut Context<Pane>,
     ) -> impl IntoElement + use<> {
         let is_active = ix == self.active_item_index;
+        let item_id = item.item_id();
+        let is_watched = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| {
+                workspace
+                    .read(cx)
+                    .watch_folder_state()
+                    .map(|state| state.watched_item_ids.contains_key(&item_id))
+            })
+            .unwrap_or(false);
         let is_preview = self
             .preview_item_id
-            .map(|id| id == item.item_id())
-            .unwrap_or(false);
+            .map(|id| id == item_id)
+            .unwrap_or(false)
+            || is_watched;
 
         let label = item.tab_content(
             TabContentParams {
@@ -2750,7 +2762,6 @@ impl Pane {
         let show_close_button = &settings.show_close_button;
         let indicator = render_item_indicator(item.boxed_clone(), cx);
         let tab_tooltip_content = item.tab_tooltip_content(cx);
-        let item_id = item.item_id();
         let is_first_item = ix == 0;
         let is_last_item = ix == self.items.len() - 1;
         let is_pinned = self.is_tab_pinned(ix);
@@ -2818,6 +2829,19 @@ impl Pane {
 
                     pane.close_item_by_id(item_id, SaveIntent::Close, window, cx)
                         .detach_and_log_err(cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |pane, event: &MouseDownEvent, _, cx| {
+                    if event.click_count > 1 {
+                        pane.unpreview_item_if_preview(item_id);
+                        if let Some(workspace) = pane.workspace.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.promote_watched_item(item_id, cx);
+                            });
+                        }
+                    }
                 }),
             )
             .on_drag(

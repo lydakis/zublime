@@ -36,6 +36,7 @@
       "shift-escape": "workspace::ToggleZoom",
       "cmd-o": "workspace::Open",
       "cmd-alt-o": "workspace::OpenFilesRecursively",
+      "cmd-ctrl-o": "directory_browser::Toggle",
       "cmd-alt-shift-t": "zed::CycleTabLayout",
       "cmd-=": ["zed::IncreaseBufferFontSize", { "persist": false }],
       "cmd-+": ["zed::IncreaseBufferFontSize", { "persist": false }],

@@ -3,8 +3,11 @@ mod file_finder_tests;
 #[cfg(test)]
 mod open_path_prompt_tests;
 
+mod directory_browser;
 pub mod file_finder_settings;
 mod open_path_prompt;
+
+pub use directory_browser::Toggle as ToggleDirectoryBrowser;
 
 use futures::future::join_all;
 pub use open_path_prompt::OpenPathDelegate;
@@ -94,6 +97,7 @@ pub fn init(cx: &mut App) {
     cx.observe_new(FileFinder::register).detach();
     cx.observe_new(OpenPathPrompt::register).detach();
     cx.observe_new(OpenPathPrompt::register_new_path).detach();
+    directory_browser::init(cx);
 }
 
 impl FileFinder {

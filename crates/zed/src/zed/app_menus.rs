@@ -1,3 +1,4 @@
+use file_finder::ToggleDirectoryBrowser;
 use gpui::{App, Menu, MenuItem, OsAction};
 use release_channel::ReleaseChannel;
 use settings::Settings;
@@ -132,6 +133,7 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                 MenuItem::action("New Window", workspace::NewWindow),
                 MenuItem::separator(),
                 MenuItem::action("Open File...", workspace::OpenFiles),
+                MenuItem::action("Browse Files...", ToggleDirectoryBrowser),
                 MenuItem::separator(),
                 MenuItem::action("Save", workspace::Save { save_intent: None }),
                 MenuItem::action("Save As…", workspace::SaveAs),

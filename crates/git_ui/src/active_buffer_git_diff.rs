@@ -4,8 +4,8 @@ use gpui::{
     AppContext, Context, Entity, EntityId, Render, Styled, Subscription, WeakEntity, Window, div,
 };
 use language::Capability;
-use ui::{IconButton, IconButtonShape, IconName, IconSize, SharedString, Tooltip, prelude::*};
 use project::git_store::GitStoreEvent;
+use ui::{IconButton, IconButtonShape, IconName, IconSize, SharedString, Tooltip, prelude::*};
 use workspace::{Pane, ProjectItem, StatusItemView, Workspace, item::ItemHandle};
 
 use crate::file_diff_view::FileDiffView;
@@ -35,7 +35,12 @@ impl ActiveBufferGitDiff {
         }
     }
 
-    fn update_for_editor(&mut self, editor: Entity<Editor>, _: &mut Window, cx: &mut Context<Self>) {
+    fn update_for_editor(
+        &mut self,
+        editor: Entity<Editor>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.active_editor = Some(editor.downgrade());
         cx.notify();
     }
@@ -116,7 +121,14 @@ fn replace_diff_with_editor(
 
     pane.update(cx, |pane, cx| {
         pane.remove_item(diff_item_id, false, false, window, cx);
-        pane.add_item(Box::new(editor.clone()), true, true, Some(destination_index), window, cx);
+        pane.add_item(
+            Box::new(editor.clone()),
+            true,
+            true,
+            Some(destination_index),
+            window,
+            cx,
+        );
     });
 }
 

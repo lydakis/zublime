@@ -1,5 +1,6 @@
 use crate::{
-    NewFile, OpenFiles, PathList, SerializedWorkspaceLocation, WORKSPACE_DB, Workspace, WorkspaceId,
+    NewFile, OpenFiles, PathList, SerializedWorkspaceLocation, WORKSPACE_DB, Workspace,
+    WorkspaceId,
     item::{Item, ItemEvent},
 };
 use gpui::WeakEntity;
@@ -158,13 +159,11 @@ const CONTENT: (Section<3>, Section<1>) = (
     },
     Section {
         title: "Configure",
-        entries: [
-            SectionEntry {
-                icon: IconName::Settings,
-                title: "Open Settings",
-                action: &OpenSettings,
-            },
-        ],
+        entries: [SectionEntry {
+            icon: IconName::Settings,
+            title: "Open Settings",
+            action: &OpenSettings,
+        }],
     },
 );
 
@@ -379,8 +378,7 @@ impl Render for WelcomePage {
                                     ),
                             )
                             .child(first_section.render(Default::default(), &self.focus_handle, cx))
-                            .child(second_section)
-                            ,
+                            .child(second_section),
                     ),
             )
     }

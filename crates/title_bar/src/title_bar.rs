@@ -231,7 +231,7 @@ impl Render for TitleBar {
                 );
             });
 
-        let height = PlatformTitleBar::height(window);
+            let height = PlatformTitleBar::height(window);
             let title_bar_color = self.platform_titlebar.update(cx, |platform_titlebar, cx| {
                 platform_titlebar.title_bar_color(window, cx)
             });

@@ -9,6 +9,7 @@ use gpui::{
     Focusable, IntoElement, Render, Task, Window,
 };
 use language::{Buffer, LanguageRegistry, Point};
+use multi_buffer::PathKey;
 use project::Project;
 use std::{
     any::{Any, TypeId},
@@ -19,7 +20,6 @@ use std::{
 };
 use ui::{Color, Icon, IconName, Label, LabelCommon as _, SharedString};
 use util::paths::PathExt as _;
-use multi_buffer::PathKey;
 use workspace::{
     Item, ItemHandle as _, ItemNavHistory, Pane, ToolbarItemLocation, Workspace,
     item::{BreadcrumbText, ItemEvent, SaveOptions, TabContentParams},
@@ -96,15 +96,7 @@ impl FileDiffView {
     ) -> Task<Result<Entity<Self>>> {
         let pane = workspace.active_pane().clone();
         Self::open_buffers_in_pane(
-            old_buffer,
-            new_buffer,
-            old_label,
-            new_label,
-            pane,
-            None,
-            workspace,
-            window,
-            cx,
+            old_buffer, new_buffer, old_label, new_label, pane, None, workspace, window, cx,
         )
     }
 

@@ -46,10 +46,9 @@ use gpui::{
     Action, AnyEntity, AnyView, AnyWeakView, App, AsyncApp, AsyncWindowContext, Bounds, Context,
     CursorStyle, Decorations, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle,
     Focusable, Global, HitboxBehavior, Hsla, KeyContext, Keystroke, ManagedView, MouseButton,
-    PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, Subscription,
-    PromptButton, SystemWindowTabController, Task, Tiling, WeakEntity, WindowBounds, WindowHandle,
-    WindowId,
-    WindowOptions, actions, canvas, point, relative, size, transparent_black,
+    PathPromptOptions, Point, PromptButton, PromptLevel, Render, ResizeEdge, Size, Stateful,
+    Subscription, SystemWindowTabController, Task, Tiling, WeakEntity, WindowBounds, WindowHandle,
+    WindowId, WindowOptions, actions, canvas, point, relative, size, transparent_black,
 };
 pub use history_manager::*;
 pub use item::{
@@ -603,11 +602,7 @@ impl OpenFolderExpansionSettings {
             recursive: recursive_override.unwrap_or(settings.open_folders_recursively),
             max_files: settings.open_folders_max_files,
             prompt_threshold: settings.open_folders_prompt_threshold,
-            ignore_names: settings
-                .open_folders_ignore
-                .iter()
-                .cloned()
-                .collect(),
+            ignore_names: settings.open_folders_ignore.iter().cloned().collect(),
             include_hidden: settings.open_folders_include_hidden,
         }
     }
@@ -738,8 +733,7 @@ pub async fn resolve_open_dialog_selection(
     let has_directory = selection_contains_directory(&paths, &fs).await;
     if allow_workspace && has_directory {
         if let Some(prompt_window) = prompt_window {
-            let detail =
-                "Open the folder as tabs or open it as a workspace?";
+            let detail = "Open the folder as tabs or open it as a workspace?";
             let answer = match prompt_window.update(cx, |_, window, cx| {
                 window.prompt(
                     PromptLevel::Warning,
@@ -814,7 +808,10 @@ pub async fn resolve_open_dialog_selection(
                 PromptLevel::Warning,
                 "Open many files?",
                 Some(&detail),
-                &[PromptButton::ok("Open Files"), PromptButton::cancel("Cancel")],
+                &[
+                    PromptButton::ok("Open Files"),
+                    PromptButton::cancel("Cancel"),
+                ],
                 cx,
             )
         }) {
@@ -842,7 +839,9 @@ fn prompt_and_open_paths(
         recursive_override,
     );
     let fs = app_state.fs.clone();
-    let prompt_window = cx.active_window().and_then(|window| window.downcast::<Workspace>());
+    let prompt_window = cx
+        .active_window()
+        .and_then(|window| window.downcast::<Workspace>());
     let paths = cx.prompt_for_paths(options);
     cx.spawn(
         async move |cx| match paths.await.anyhow().and_then(|res| res) {
@@ -1542,10 +1541,18 @@ pub struct Workspace {
     scheduled_tasks: Vec<Task<()>>,
     last_open_dock_positions: Vec<DockPosition>,
     removing: bool,
+    directory_browser_state: DirectoryBrowserState,
     utility_panes: UtilityPaneState,
 }
 
 impl EventEmitter<Event> for Workspace {}
+
+#[derive(Clone, Debug, Default)]
+pub struct DirectoryBrowserState {
+    pub root_path: Option<PathBuf>,
+    pub expanded_dirs: HashSet<PathBuf>,
+    pub selected_path: Option<PathBuf>,
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ViewId {
@@ -1965,6 +1972,7 @@ impl Workspace {
             scheduled_tasks: Vec::new(),
             last_open_dock_positions: Vec::new(),
             removing: false,
+            directory_browser_state: DirectoryBrowserState::default(),
             utility_panes: UtilityPaneState::default(),
         }
     }
@@ -2642,6 +2650,14 @@ impl Workspace {
 
     pub fn set_prompt_for_open_path(&mut self, prompt: PromptForOpenPath) {
         self.on_prompt_for_open_path = Some(prompt)
+    }
+
+    pub fn directory_browser_state(&self) -> &DirectoryBrowserState {
+        &self.directory_browser_state
+    }
+
+    pub fn set_directory_browser_state(&mut self, state: DirectoryBrowserState) {
+        self.directory_browser_state = state;
     }
 
     pub fn set_terminal_provider(&mut self, provider: impl TerminalProvider + 'static) {

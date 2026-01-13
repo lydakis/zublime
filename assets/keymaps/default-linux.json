@@ -27,6 +27,7 @@
       "open": "workspace::Open",
       "ctrl-o": "workspace::OpenFiles",
       "ctrl-alt-o": "workspace::OpenFilesRecursively",
+      "ctrl-alt-shift-o": "directory_browser::Toggle",
       "ctrl-k ctrl-o": "workspace::Open",
       "ctrl-alt-shift-t": "zed::CycleTabLayout",
       "ctrl-=": ["zed::IncreaseBufferFontSize", { "persist": false }],

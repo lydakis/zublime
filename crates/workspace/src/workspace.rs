@@ -17,6 +17,7 @@ mod theme_preview;
 mod toast_layer;
 mod toolbar;
 pub mod utility_pane;
+mod watch_folder;
 pub mod welcome;
 mod workspace_settings;
 
@@ -128,6 +129,7 @@ use util::{
     serde::default_true,
 };
 use uuid::Uuid;
+use watch_folder::{WatchFolderState, WatchStatus};
 pub use workspace_settings::{
     AutosaveSetting, BottomDockLayout, RestoreOnStartupBehavior, StatusBarSettings, TabBarLayout,
     TabBarSettings, WorkspaceSettings,
@@ -251,6 +253,12 @@ actions!(
         OpenFiles,
         /// Opens files and expands selected folders recursively.
         OpenFilesRecursively,
+        /// Watches a folder and opens changed files.
+        WatchFolder,
+        /// Pauses or resumes watching the current folder.
+        ToggleWatchPause,
+        /// Stops watching the current folder.
+        StopWatchingFolder,
         /// Opens the current location in terminal.
         OpenInTerminal,
         /// Opens the component preview.
@@ -886,6 +894,7 @@ pub fn init(app_state: Arc<AppState>, cx: &mut App) {
     theme_preview::init(cx);
     toast_layer::init(cx);
     history_manager::init(cx);
+    watch_folder::init(cx);
 
     cx.on_action(|_: &CloseWindow, cx| Workspace::close_global(cx))
         .on_action(|_: &Reload, cx| reload(cx))
@@ -1481,6 +1490,7 @@ pub struct Workspace {
     last_active_center_pane: Option<WeakEntity<Pane>>,
     last_active_view_id: Option<proto::ViewId>,
     status_bar: Entity<StatusBar>,
+    watch_status_item: Entity<WatchStatus>,
     modal_layer: Entity<ModalLayer>,
     toast_layer: Entity<ToastLayer>,
     titlebar_item: Option<AnyView>,
@@ -1517,6 +1527,8 @@ pub struct Workspace {
     last_open_dock_positions: Vec<DockPosition>,
     removing: bool,
     directory_browser_state: DirectoryBrowserState,
+    watch_folder: Option<WatchFolderState>,
+    watch_request_id: u64,
     utility_panes: UtilityPaneState,
 }
 
@@ -1783,9 +1795,11 @@ impl Workspace {
         let left_dock_buttons = cx.new(|cx| PanelButtons::new(left_dock.clone(), cx));
         let bottom_dock_buttons = cx.new(|cx| PanelButtons::new(bottom_dock.clone(), cx));
         let right_dock_buttons = cx.new(|cx| PanelButtons::new(right_dock.clone(), cx));
+        let watch_status_item = cx.new(|_| WatchStatus::new(weak_handle.clone()));
         let status_bar = cx.new(|cx| {
             let mut status_bar = StatusBar::new(&center_pane.clone(), window, cx);
             status_bar.add_left_item(left_dock_buttons, window, cx);
+            status_bar.add_left_item(watch_status_item.clone(), window, cx);
             status_bar.add_right_item(right_dock_buttons, window, cx);
             status_bar.add_right_item(bottom_dock_buttons, window, cx);
             status_bar
@@ -1888,6 +1902,7 @@ impl Workspace {
             last_active_center_pane: Some(center_pane.downgrade()),
             last_active_view_id: None,
             status_bar,
+            watch_status_item,
             modal_layer,
             toast_layer,
             titlebar_item: None,
@@ -1930,6 +1945,8 @@ impl Workspace {
             last_open_dock_positions: Vec::new(),
             removing: false,
             directory_browser_state: DirectoryBrowserState::default(),
+            watch_folder: None,
+            watch_request_id: 0,
             utility_panes: UtilityPaneState::default(),
         }
     }
@@ -4636,6 +4653,7 @@ impl Workspace {
             pane::Event::RemovedItem { item } => {
                 cx.emit(Event::ActiveItemChanged);
                 self.update_window_edited(window, cx);
+                self.forget_watched_item(item.item_id());
                 if let hash_map::Entry::Occupied(entry) = self.panes_by_item.entry(item.item_id())
                     && entry.get().entity_id() == pane.entity_id()
                 {

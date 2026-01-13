@@ -836,6 +836,35 @@ impl GitStore {
                 .as_ref()
                 .and_then(|weak| weak.upgrade())
         {
+            if !uncommitted_diff.read(cx).base_text_exists() {
+                if let Some((repo, repo_path)) =
+                    self.repository_and_path_for_buffer_id(buffer_id, cx)
+                {
+                    let buffer = buffer.clone();
+                    let diff_state = diff_state.clone();
+                    return cx.spawn(async move |_this, cx| {
+                        let diff_bases_change = repo
+                            .update(cx, |repo, cx| {
+                                repo.load_committed_text(buffer_id, repo_path, cx)
+                            })
+                            .await?;
+                        let wait = diff_state.update(cx, |diff_state, cx| {
+                            let buffer_snapshot = buffer.read(cx).text_snapshot();
+                            diff_state.diff_bases_changed(
+                                buffer_snapshot,
+                                Some(diff_bases_change),
+                                cx,
+                            );
+                            diff_state.wait_for_recalculation()
+                        });
+                        if let Some(wait) = wait {
+                            wait.await;
+                        }
+                        Ok(uncommitted_diff)
+                    });
+                }
+            }
+
             if let Some(task) =
                 diff_state.update(cx, |diff_state, _| diff_state.wait_for_recalculation())
             {
@@ -1341,10 +1370,11 @@ impl GitStore {
                 else {
                     return;
                 };
-                if !worktree.read(cx).is_visible() {
+                let worktree_ref = worktree.read(cx);
+                if !worktree_ref.is_visible() && !worktree_ref.is_single_file() {
                     log::debug!(
                         "not adding repositories for local worktree {:?} because it's not visible",
-                        worktree.read(cx).abs_path()
+                        worktree_ref.abs_path()
                     );
                     return;
                 }

@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, FocusHandle,
     Focusable, IntoElement, Render, Task, Window,
 };
-use language::{Buffer, LanguageRegistry};
+use language::{Buffer, LanguageRegistry, Point};
 use project::Project;
 use std::{
     any::{Any, TypeId},
@@ -19,6 +19,7 @@ use std::{
 };
 use ui::{Color, Icon, IconName, Label, LabelCommon as _, SharedString};
 use util::paths::PathExt as _;
+use multi_buffer::PathKey;
 use workspace::{
     Item, ItemHandle as _, ItemNavHistory, Pane, ToolbarItemLocation, Workspace,
     item::{BreadcrumbText, ItemEvent, SaveOptions, TabContentParams},
@@ -168,17 +169,24 @@ impl FileDiffView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let multibuffer = cx.new(|cx| {
-            let mut multibuffer = MultiBuffer::singleton(new_buffer.clone(), cx);
-            multibuffer.add_diff(diff.clone(), cx);
-            multibuffer
-        });
+        let multibuffer = cx.new(|cx| MultiBuffer::new(new_buffer.read(cx).capability()));
         let editor = cx.new(|cx| {
             let mut diff_display_editor = SplittableEditor::new_unsplit(
                 multibuffer.clone(),
                 project.clone(),
                 workspace.clone(),
                 window,
+                cx,
+            );
+            let path = PathKey::for_buffer(&new_buffer, cx);
+            let snapshot = new_buffer.read(cx).snapshot();
+            let full_range = Point::new(0, 0)..snapshot.max_point();
+            diff_display_editor.set_excerpts_for_path(
+                path.clone(),
+                new_buffer.clone(),
+                [full_range.clone()],
+                0,
+                diff.clone(),
                 cx,
             );
             diff_display_editor
@@ -192,8 +200,32 @@ impl FileDiffView {
                         cx,
                     );
                 });
-            diff_display_editor.enable_split_diff(window, cx);
             diff_display_editor
+        });
+        let path = PathKey::for_buffer(&new_buffer, cx);
+        let full_range = {
+            let snapshot = new_buffer.read(cx).snapshot();
+            Point::new(0, 0)..snapshot.max_point()
+        };
+        window.defer(cx, {
+            let editor = editor.clone();
+            let diff = diff.clone();
+            let new_buffer = new_buffer.clone();
+            let path = path.clone();
+            let full_range = full_range.clone();
+            move |window, cx| {
+                editor.update(cx, |editor, cx| {
+                    editor.enable_split_diff(window, cx);
+                    editor.set_excerpts_for_path(
+                        path.clone(),
+                        new_buffer.clone(),
+                        [full_range.clone()],
+                        0,
+                        diff.clone(),
+                        cx,
+                    );
+                });
+            }
         });
 
         let (buffer_changes_tx, mut buffer_changes_rx) = watch::channel(());

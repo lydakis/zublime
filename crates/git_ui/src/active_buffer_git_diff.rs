@@ -3,8 +3,9 @@ use editor::Editor;
 use gpui::{
     AppContext, Context, Entity, EntityId, Render, Styled, Subscription, WeakEntity, Window, div,
 };
-use language::{Buffer, Capability};
+use language::Capability;
 use ui::{IconButton, IconButtonShape, IconName, IconSize, SharedString, Tooltip, prelude::*};
+use project::git_store::GitStoreEvent;
 use workspace::{Pane, ProjectItem, StatusItemView, Workspace, item::ItemHandle};
 
 use crate::file_diff_view::FileDiffView;
@@ -18,8 +19,9 @@ pub enum DiffBase {
 pub struct ActiveBufferGitDiff {
     workspace: WeakEntity<Workspace>,
     project: WeakEntity<project::Project>,
-    show_button: bool,
+    active_editor: Option<WeakEntity<Editor>>,
     _observe_active_editor: Option<Subscription>,
+    _observe_git_store: Option<Subscription>,
 }
 
 impl ActiveBufferGitDiff {
@@ -27,34 +29,14 @@ impl ActiveBufferGitDiff {
         Self {
             workspace: workspace.weak_handle(),
             project: workspace.project().clone().downgrade(),
-            show_button: false,
+            active_editor: None,
             _observe_active_editor: None,
+            _observe_git_store: None,
         }
     }
 
     fn update_for_editor(&mut self, editor: Entity<Editor>, _: &mut Window, cx: &mut Context<Self>) {
-        self.show_button = false;
-
-        let Some(project) = self.project.upgrade() else {
-            cx.notify();
-            return;
-        };
-
-        let Some((_, buffer, _)) = editor.read(cx).active_excerpt(cx) else {
-            cx.notify();
-            return;
-        };
-
-        let buffer_id = buffer.read(cx).remote_id();
-        let in_repo = project
-            .read(cx)
-            .git_store()
-            .read(cx)
-            .repository_and_path_for_buffer_id(buffer_id, cx)
-            .is_some();
-
-        self.show_button = in_repo;
-
+        self.active_editor = Some(editor.downgrade());
         cx.notify();
     }
 
@@ -76,7 +58,28 @@ impl ActiveBufferGitDiff {
 
 impl Render for ActiveBufferGitDiff {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl ui::IntoElement {
-        if !self.show_button {
+        let Some(project) = self.project.upgrade() else {
+            return div().hidden();
+        };
+        let Some(editor) = self
+            .active_editor
+            .as_ref()
+            .and_then(|editor| editor.upgrade())
+        else {
+            return div().hidden();
+        };
+        let Some((_, buffer, _)) = editor.read(cx).active_excerpt(cx) else {
+            return div().hidden();
+        };
+        let buffer_id = buffer.read(cx).remote_id();
+        let in_repo = project
+            .read(cx)
+            .git_store()
+            .read(cx)
+            .repository_and_path_for_buffer_id(buffer_id, cx)
+            .is_some();
+
+        if !in_repo {
             return div().hidden();
         }
 
@@ -154,17 +157,13 @@ fn open_diff_for_editor(
     window
         .spawn(cx, async move |cx| -> Result<()> {
             let diff = diff_task.await?;
-            let base_text = diff
-                .read_with(cx, |diff, cx| diff.base_text_string(cx))
-                .unwrap_or_default();
             let language = buffer.read_with(cx, |buffer, _| buffer.language().cloned());
-            let old_buffer = cx.new(|cx| {
-                let mut buffer = Buffer::local(base_text, cx);
+            let old_buffer = diff.read_with(cx, |diff, _| diff.base_text_buffer());
+            old_buffer.update(cx, |buffer, cx| {
                 if let Some(language) = language {
-                    buffer = buffer.with_language(language, cx);
+                    buffer.set_language(Some(language), cx);
                 }
                 buffer.set_capability(Capability::ReadOnly, cx);
-                buffer
             });
 
             let Some(workspace) = workspace.upgrade() else {
@@ -174,22 +173,30 @@ fn open_diff_for_editor(
                 return Ok(());
             };
 
-            let diff_view_task = workspace.update_in(cx, |workspace, window, cx| {
-                FileDiffView::open_buffers_in_pane(
-                    old_buffer,
-                    buffer,
-                    Some(label),
-                    None,
-                    pane.clone(),
-                    Some(destination_index),
-                    workspace,
-                    window,
-                    cx,
-                )
-            })?;
-            let _ = diff_view_task.await?;
-            workspace.update_in(cx, |_, window, cx| {
+            workspace.update_in(cx, |_workspace, window, cx| {
+                let workspace_handle = cx.entity();
+                let diff_view = cx.new(|cx| {
+                    FileDiffView::new(
+                        old_buffer.clone(),
+                        buffer.clone(),
+                        diff.clone(),
+                        project.clone(),
+                        workspace_handle,
+                        Some(label),
+                        None,
+                        window,
+                        cx,
+                    )
+                });
                 pane.update(cx, |pane, cx| {
+                    pane.add_item(
+                        Box::new(diff_view.clone()),
+                        true,
+                        true,
+                        Some(destination_index),
+                        window,
+                        cx,
+                    );
                     pane.remove_item(item_id, false, false, window, cx);
                 });
             })?;
@@ -252,12 +259,32 @@ impl StatusItemView for ActiveBufferGitDiff {
         cx: &mut Context<Self>,
     ) {
         if let Some(editor) = active_pane_item.and_then(|item| item.downcast::<Editor>()) {
+            self.active_editor = Some(editor.downgrade());
             self._observe_active_editor =
                 Some(cx.observe_in(&editor, window, Self::update_for_editor));
             self.update_for_editor(editor, window, cx);
         } else {
-            self.show_button = false;
+            self.active_editor = None;
             self._observe_active_editor = None;
+        }
+
+        if self._observe_git_store.is_none() {
+            let Some(project) = self.project.upgrade() else {
+                cx.notify();
+                return;
+            };
+            let git_store = project.read(cx).git_store().clone();
+            self._observe_git_store = Some(cx.subscribe(&git_store, |_this, _, event, cx| {
+                if matches!(
+                    event,
+                    GitStoreEvent::RepositoryAdded
+                        | GitStoreEvent::RepositoryRemoved(_)
+                        | GitStoreEvent::RepositoryUpdated(_, _, _)
+                        | GitStoreEvent::ActiveRepositoryChanged(_)
+                ) {
+                    cx.notify();
+                }
+            }));
         }
 
         cx.notify();

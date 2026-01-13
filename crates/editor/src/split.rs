@@ -45,6 +45,7 @@ pub struct SplittableEditor {
     secondary: Option<SecondaryEditor>,
     panes: PaneGroup,
     workspace: WeakEntity<Workspace>,
+    is_syncing_scroll: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,15 +108,31 @@ impl SplittableEditor {
         });
         let panes = PaneGroup::new(pane);
         // TODO(split-diff) we might want to tag editor events with whether they came from primary/secondary
-        let subscriptions = vec![cx.subscribe(
+        let subscriptions = vec![cx.subscribe_in(
             &primary_editor,
-            |this, _, event: &EditorEvent, cx| match event {
+            window,
+            |this, editor, event: &EditorEvent, window, cx| match event {
                 EditorEvent::ExpandExcerptsRequested {
                     excerpt_ids,
                     lines,
                     direction,
                 } => {
                     this.expand_excerpts(excerpt_ids.iter().copied(), *lines, *direction, cx);
+                }
+                EditorEvent::ScrollPositionChanged { local, .. } if *local => {
+                    if this.is_syncing_scroll {
+                        return;
+                    }
+                    let Some(secondary) = &this.secondary else {
+                        return;
+                    };
+                    let scroll_position =
+                        editor.update(cx, |editor, cx| editor.scroll_position(cx));
+                    this.is_syncing_scroll = true;
+                    secondary.editor.update(cx, |secondary_editor, cx| {
+                        secondary_editor.set_scroll_position(scroll_position, window, cx);
+                    });
+                    this.is_syncing_scroll = false;
                 }
                 EditorEvent::SelectionsChanged { .. } => {
                     if let Some(secondary) = &mut this.secondary {
@@ -146,6 +163,7 @@ impl SplittableEditor {
             secondary: None,
             panes,
             workspace: workspace.downgrade(),
+            is_syncing_scroll: false,
             _subscriptions: subscriptions,
         }
     }
@@ -201,9 +219,10 @@ impl SplittableEditor {
             pane
         });
 
-        let subscriptions = vec![cx.subscribe(
+        let subscriptions = vec![cx.subscribe_in(
             &secondary_editor,
-            |this, _, event: &EditorEvent, cx| match event {
+            window,
+            |this, editor, event: &EditorEvent, window, cx| match event {
                 EditorEvent::ExpandExcerptsRequested {
                     excerpt_ids,
                     lines,
@@ -222,6 +241,18 @@ impl SplittableEditor {
                         secondary.has_latest_selection = true;
                     }
                     cx.emit(event.clone());
+                }
+                EditorEvent::ScrollPositionChanged { local, .. } if *local => {
+                    if this.is_syncing_scroll {
+                        return;
+                    }
+                    let scroll_position =
+                        editor.update(cx, |editor, cx| editor.scroll_position(cx));
+                    this.is_syncing_scroll = true;
+                    this.primary_editor.update(cx, |primary_editor, cx| {
+                        primary_editor.set_scroll_position(scroll_position, window, cx);
+                    });
+                    this.is_syncing_scroll = false;
                 }
                 _ => cx.emit(event.clone()),
             },

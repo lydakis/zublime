@@ -18,43 +18,40 @@ fn render_base_keymap_section(tab_index: &mut isize, cx: &mut App) -> impl IntoE
         BaseKeymap::TextMate | BaseKeymap::None => None,
     };
 
-    v_flex()
-        .gap_2()
-        .child(Label::new("Shortcuts"))
-        .child(
-            ToggleButtonGroup::two_rows(
-                "base_keymap_selection",
-                [
-                    ToggleButtonWithIcon::new("VS Code", IconName::EditorVsCode, |_, _, cx| {
-                        write_keymap_base(BaseKeymap::VSCode, cx);
-                    }),
-                    ToggleButtonWithIcon::new("JetBrains", IconName::EditorJetBrains, |_, _, cx| {
-                        write_keymap_base(BaseKeymap::JetBrains, cx);
-                    }),
-                    ToggleButtonWithIcon::new("Sublime Text", IconName::EditorSublime, |_, _, cx| {
-                        write_keymap_base(BaseKeymap::SublimeText, cx);
-                    }),
-                ],
-                [
-                    ToggleButtonWithIcon::new("Atom", IconName::EditorAtom, |_, _, cx| {
-                        write_keymap_base(BaseKeymap::Atom, cx);
-                    }),
-                    ToggleButtonWithIcon::new("Emacs", IconName::EditorEmacs, |_, _, cx| {
-                        write_keymap_base(BaseKeymap::Emacs, cx);
-                    }),
-                    ToggleButtonWithIcon::new("Cursor", IconName::EditorCursor, |_, _, cx| {
-                        write_keymap_base(BaseKeymap::Cursor, cx);
-                    }),
-                ],
-            )
-            .when_some(base_keymap, |this, base_keymap| {
-                this.selected_index(base_keymap)
-            })
-            .full_width()
-            .tab_index(tab_index)
-            .size(ToggleButtonGroupSize::Medium)
-            .style(ui::ToggleButtonGroupStyle::Outlined),
+    v_flex().gap_2().child(Label::new("Shortcuts")).child(
+        ToggleButtonGroup::two_rows(
+            "base_keymap_selection",
+            [
+                ToggleButtonWithIcon::new("VS Code", IconName::EditorVsCode, |_, _, cx| {
+                    write_keymap_base(BaseKeymap::VSCode, cx);
+                }),
+                ToggleButtonWithIcon::new("JetBrains", IconName::EditorJetBrains, |_, _, cx| {
+                    write_keymap_base(BaseKeymap::JetBrains, cx);
+                }),
+                ToggleButtonWithIcon::new("Sublime Text", IconName::EditorSublime, |_, _, cx| {
+                    write_keymap_base(BaseKeymap::SublimeText, cx);
+                }),
+            ],
+            [
+                ToggleButtonWithIcon::new("Atom", IconName::EditorAtom, |_, _, cx| {
+                    write_keymap_base(BaseKeymap::Atom, cx);
+                }),
+                ToggleButtonWithIcon::new("Emacs", IconName::EditorEmacs, |_, _, cx| {
+                    write_keymap_base(BaseKeymap::Emacs, cx);
+                }),
+                ToggleButtonWithIcon::new("Cursor", IconName::EditorCursor, |_, _, cx| {
+                    write_keymap_base(BaseKeymap::Cursor, cx);
+                }),
+            ],
         )
+        .when_some(base_keymap, |this, base_keymap| {
+            this.selected_index(base_keymap)
+        })
+        .full_width()
+        .tab_index(tab_index)
+        .size(ToggleButtonGroupSize::Medium)
+        .style(ui::ToggleButtonGroupStyle::Outlined),
+    )
 }
 
 fn render_vim_mode_switch(tab_index: &mut isize, cx: &mut App) -> impl IntoElement {

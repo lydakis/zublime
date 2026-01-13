@@ -61,9 +61,9 @@ use rope::Rope;
 use search::project_search::ProjectSearchBar;
 use settings::{
     BaseKeymap, DEFAULT_KEYMAP_PATH, InvalidSettingsError, KeybindSource, KeymapFile,
-    KeymapFileLoadResult, MigrationStatus, Settings, SettingsStore, TabBarLayout,
-    VIM_KEYMAP_PATH, initial_local_debug_tasks_content, initial_project_settings_content,
-    initial_tasks_content, update_settings_file,
+    KeymapFileLoadResult, MigrationStatus, Settings, SettingsStore, TabBarLayout, VIM_KEYMAP_PATH,
+    initial_local_debug_tasks_content, initial_project_settings_content, initial_tasks_content,
+    update_settings_file,
 };
 use std::time::Duration;
 use std::{
@@ -86,9 +86,8 @@ use workspace::notifications::{
 use workspace::utility_pane::utility_slot_for_dock_position;
 use workspace::{
     AppState, NewFile, NewWindow, OpenLog, Panel, TabBarSettings, Toast, Workspace,
-    WorkspaceSettings,
-    create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
-    open_new,
+    WorkspaceSettings, create_and_open_local_file,
+    notifications::simple_message_notification::MessageNotification, open_new,
 };
 use workspace::{
     CloseIntent, CloseWindow, NotificationFrame, RestoreBanner, with_active_or_new_workspace,

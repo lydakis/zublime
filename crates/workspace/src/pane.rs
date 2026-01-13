@@ -4280,7 +4280,10 @@ impl Render for Pane {
                                     let workspace = self.workspace.clone();
                                     self.welcome_page = Some(cx.new(|cx| {
                                         crate::welcome::WelcomePage::new(
-                                            workspace, !MINIMAL_UI, window, cx,
+                                            workspace,
+                                            !MINIMAL_UI,
+                                            window,
+                                            cx,
                                         )
                                     }));
                                 }
@@ -7413,10 +7416,7 @@ mod tests {
         cx.update(|cx| {
             let mut settings_store = SettingsStore::test(cx);
             settings_store.update_user_settings(cx, |settings| {
-                settings
-                    .tab_bar
-                    .get_or_insert_default()
-                    .layout = Some(TabBarLayout::Horizontal);
+                settings.tab_bar.get_or_insert_default().layout = Some(TabBarLayout::Horizontal);
             });
             cx.set_global(settings_store);
             theme::init(LoadThemes::JustBase, cx);

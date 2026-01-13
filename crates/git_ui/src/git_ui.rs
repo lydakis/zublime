@@ -35,8 +35,8 @@ use crate::{
     text_diff_view::TextDiffView,
 };
 
-mod askpass_modal;
 pub mod active_buffer_git_diff;
+mod askpass_modal;
 pub mod branch_picker;
 mod commit_modal;
 pub mod commit_tooltip;

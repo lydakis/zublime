@@ -39,8 +39,28 @@ function Get-VSArch {
     }
 }
 
+function Get-VsDevShellPath {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $installPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+        if ($installPath) {
+            $candidate = Join-Path $installPath "Common7\Tools\Launch-VsDevShell.ps1"
+            if (Test-Path $candidate) {
+                return $candidate
+            }
+        }
+    }
+
+    $fallback = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1"
+    if (Test-Path $fallback) {
+        return $fallback
+    }
+
+    throw "Visual Studio DevShell not found. Install Visual Studio 2022 Build Tools or set up MSVC toolchain."
+}
+
 Push-Location
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
+& (Get-VsDevShellPath) -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
 Pop-Location
 
 $target = "$Architecture-pc-windows-msvc"

@@ -1727,6 +1727,8 @@ impl ProtoClient for Client {
 
 /// prefix for the zed:// url scheme
 pub const ZED_URL_SCHEME: &str = "zed";
+/// prefix for the zublime:// url scheme
+pub const ZUBLIME_URL_SCHEME: &str = "zublime";
 
 /// A parsed Zed link that can be handled internally by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1750,6 +1752,10 @@ pub fn parse_zed_link(link: &str, cx: &App) -> Option<ZedLink> {
     let path = link
         .strip_prefix(server_url)
         .and_then(|result| result.strip_prefix('/'))
+        .or_else(|| {
+            link.strip_prefix(ZUBLIME_URL_SCHEME)
+                .and_then(|result| result.strip_prefix("://"))
+        })
         .or_else(|| {
             link.strip_prefix(ZED_URL_SCHEME)
                 .and_then(|result| result.strip_prefix("://"))

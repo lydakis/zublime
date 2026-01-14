@@ -100,7 +100,7 @@ function GenerateLicenses {
 }
 
 function BuildZedAndItsFriends {
-    Write-Output "Building Zed and its friends, for channel: $channel"
+    Write-Output "Building Zublime and its friends, for channel: $channel"
     # Build zed.exe, cli.exe and auto_update_helper.exe
     cargo build --release --package zed --package cli --package auto_update_helper --target $target
     Copy-Item -Path ".\$CargoOutDir\zed.exe" -Destination "$innoDir\Zed.exe" -Force
@@ -250,60 +250,60 @@ function BuildInstaller {
     $issFilePath = "$innoDir\zed.iss"
     switch ($channel) {
         "stable" {
-            $appId = "{{2DB0DA96-CA55-49BB-AF4F-64AF36A86712}"
+            $appId = "{{18021599-28E8-48A1-B12C-37B2D9B45BA3}"
             $appIconName = "app-icon"
-            $appName = "Zed"
-            $appDisplayName = "Zed"
-            $appSetupName = "Zed-$Architecture"
+            $appName = "Zublime"
+            $appDisplayName = "Zublime"
+            $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Stable-Instance-Mutex"
+            $appMutex = "Zublime-Editor-Stable-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "Zed"
-            $appUserId = "ZedIndustries.Zed"
-            $appShellNameShort = "Z&ed"
-            $appAppxFullName = "ZedIndustries.Zed_1.0.0.0_neutral__japxn1gcva8rg"
+            $regValueName = "Zublime"
+            $appUserId = "ooo.engineered.Zublime"
+            $appShellNameShort = "Z&ublime"
+            $appAppxFullName = "ooo.engineered.Zublime_1.0.0.0_neutral__engineered"
         }
         "preview" {
-            $appId = "{{F70E4811-D0E2-4D88-AC99-D63752799F95}"
+            $appId = "{{7FE01E30-0344-4459-A60E-1A89AA6355CF}"
             $appIconName = "app-icon-preview"
-            $appName = "Zed Preview"
-            $appDisplayName = "Zed Preview"
-            $appSetupName = "Zed-$Architecture"
+            $appName = "Zublime Preview"
+            $appDisplayName = "Zublime Preview"
+            $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Preview-Instance-Mutex"
+            $appMutex = "Zublime-Editor-Preview-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedPreview"
-            $appUserId = "ZedIndustries.Zed.Preview"
-            $appShellNameShort = "Z&ed Preview"
-            $appAppxFullName = "ZedIndustries.Zed.Preview_1.0.0.0_neutral__japxn1gcva8rg"
+            $regValueName = "ZublimePreview"
+            $appUserId = "ooo.engineered.Zublime.Preview"
+            $appShellNameShort = "Z&ublime Preview"
+            $appAppxFullName = "ooo.engineered.Zublime.Preview_1.0.0.0_neutral__engineered"
         }
         "nightly" {
-            $appId = "{{1BDB21D3-14E7-433C-843C-9C97382B2FE0}"
+            $appId = "{{0653485C-6764-40E3-BC38-ACB1E9072EDF}"
             $appIconName = "app-icon-nightly"
-            $appName = "Zed Nightly"
-            $appDisplayName = "Zed Nightly"
-            $appSetupName = "Zed-$Architecture"
+            $appName = "Zublime Nightly"
+            $appDisplayName = "Zublime Nightly"
+            $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Nightly-Instance-Mutex"
+            $appMutex = "Zublime-Editor-Nightly-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedNightly"
-            $appUserId = "ZedIndustries.Zed.Nightly"
-            $appShellNameShort = "Z&ed Editor Nightly"
-            $appAppxFullName = "ZedIndustries.Zed.Nightly_1.0.0.0_neutral__japxn1gcva8rg"
+            $regValueName = "ZublimeNightly"
+            $appUserId = "ooo.engineered.Zublime.Nightly"
+            $appShellNameShort = "Z&ublime Nightly"
+            $appAppxFullName = "ooo.engineered.Zublime.Nightly_1.0.0.0_neutral__engineered"
         }
         "dev" {
-            $appId = "{{8357632E-24A4-4F32-BA97-E575B4D1FE5D}"
+            $appId = "{{5223A396-4ED6-4B3A-9939-DAFD83B1082D}"
             $appIconName = "app-icon-dev"
-            $appName = "Zed Dev"
-            $appDisplayName = "Zed Dev"
-            $appSetupName = "Zed-$Architecture"
+            $appName = "Zublime Dev"
+            $appDisplayName = "Zublime Dev"
+            $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Dev-Instance-Mutex"
+            $appMutex = "Zublime-Editor-Dev-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedDev"
-            $appUserId = "ZedIndustries.Zed.Dev"
-            $appShellNameShort = "Z&ed Dev"
-            $appAppxFullName = "ZedIndustries.Zed.Dev_1.0.0.0_neutral__japxn1gcva8rg"
+            $regValueName = "ZublimeDev"
+            $appUserId = "ooo.engineered.Zublime.Dev"
+            $appShellNameShort = "Z&ublime Dev"
+            $appAppxFullName = "ooo.engineered.Zublime.Dev_1.0.0.0_neutral__engineered"
         }
         default {
             Write-Error "can't bundle installer for $channel."
@@ -385,8 +385,8 @@ if($env:CI) {
 if ($buildSuccess) {
     Write-Output "Build successful"
     if ($Install) {
-        Write-Output "Installing Zed..."
-        Start-Process -FilePath "$env:ZED_WORKSPACE/target/ZedEditorUserSetup-x64-$env:RELEASE_VERSION.exe"
+        Write-Output "Installing Zublime..."
+        Start-Process -FilePath "$env:ZED_WORKSPACE/target/Zublime-$Architecture.exe"
     }
     exit 0
 }

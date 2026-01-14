@@ -4,6 +4,7 @@ name: release_nightly
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
+  ZED_WORKSPACE: ${{ github.workspace }}
 on:
   push:
     tags:
@@ -12,8 +13,8 @@ on:
   - cron: 0 7 * * *
 jobs:
   check_style:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-mac-large
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: macos-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -26,8 +27,8 @@ jobs:
       run: ./script/clippy
     timeout-minutes: 60
   run_tests_windows:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: self-32vcpu-windows-2022
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: windows-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -72,11 +73,11 @@ jobs:
       shell: pwsh
     timeout-minutes: 60
   bundle_linux_aarch64:
+    if: ${{ vars.ENABLE_ARM_BUILDS == 'true' }}
     needs:
     - check_style
     - run_tests_windows
-    - clippy_windows
-    runs-on: namespace-profile-8x32-ubuntu-2004-arm-m4
+    runs-on: ubuntu-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -93,6 +94,7 @@ jobs:
         echo "Publishing version: ${version} on release channel nightly"
         echo "nightly" > crates/zed/RELEASE_CHANNEL
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -104,25 +106,25 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: ./script/bundle-linux
       run: ./script/bundle-linux
-    - name: '@actions/upload-artifact zed-linux-aarch64.tar.gz'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact zublime-linux-aarch64.tar.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-linux-aarch64.tar.gz
-        path: target/release/zed-linux-aarch64.tar.gz
+        name: zublime-linux-aarch64.tar.gz
+        path: target/release/zublime-linux-aarch64.tar.gz
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-linux-aarch64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-linux-aarch64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-linux-aarch64.gz
-        path: target/zed-remote-server-linux-aarch64.gz
+        name: zublime-remote-server-linux-aarch64.gz
+        path: target/zublime-remote-server-linux-aarch64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_linux_x86_64:
     needs:
     - check_style
     - run_tests_windows
-    - clippy_windows
-    runs-on: namespace-profile-32x64-ubuntu-2004
+    runs-on: ubuntu-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -139,6 +141,7 @@ jobs:
         echo "Publishing version: ${version} on release channel nightly"
         echo "nightly" > crates/zed/RELEASE_CHANNEL
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -150,25 +153,25 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: ./script/bundle-linux
       run: ./script/bundle-linux
-    - name: '@actions/upload-artifact zed-linux-x86_64.tar.gz'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact zublime-linux-x86_64.tar.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-linux-x86_64.tar.gz
-        path: target/release/zed-linux-x86_64.tar.gz
+        name: zublime-linux-x86_64.tar.gz
+        path: target/release/zublime-linux-x86_64.tar.gz
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-linux-x86_64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-linux-x86_64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-linux-x86_64.gz
-        path: target/zed-remote-server-linux-x86_64.gz
+        name: zublime-remote-server-linux-x86_64.gz
+        path: target/zublime-remote-server-linux-x86_64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_mac_aarch64:
     needs:
     - check_style
     - run_tests_windows
-    - clippy_windows
-    runs-on: namespace-profile-mac-large
+    runs-on: macos-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -194,6 +197,7 @@ jobs:
       with:
         node-version: '20'
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -201,25 +205,25 @@ jobs:
       run: ./script/clear-target-dir-if-larger-than 300
     - name: run_bundling::bundle_mac::bundle_mac
       run: ./script/bundle-mac aarch64-apple-darwin
-    - name: '@actions/upload-artifact Zed-aarch64.dmg'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact Zublime-aarch64.dmg'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-aarch64.dmg
-        path: target/aarch64-apple-darwin/release/Zed-aarch64.dmg
+        name: Zublime-aarch64.dmg
+        path: target/aarch64-apple-darwin/release/Zublime-aarch64.dmg
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-macos-aarch64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-macos-aarch64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-macos-aarch64.gz
-        path: target/zed-remote-server-macos-aarch64.gz
+        name: zublime-remote-server-macos-aarch64.gz
+        path: target/zublime-remote-server-macos-aarch64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_mac_x86_64:
     needs:
     - check_style
     - run_tests_windows
-    - clippy_windows
-    runs-on: namespace-profile-mac-large
+    runs-on: macos-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -245,6 +249,7 @@ jobs:
       with:
         node-version: '20'
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -252,27 +257,29 @@ jobs:
       run: ./script/clear-target-dir-if-larger-than 300
     - name: run_bundling::bundle_mac::bundle_mac
       run: ./script/bundle-mac x86_64-apple-darwin
-    - name: '@actions/upload-artifact Zed-x86_64.dmg'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact Zublime-x86_64.dmg'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-x86_64.dmg
-        path: target/x86_64-apple-darwin/release/Zed-x86_64.dmg
+        name: Zublime-x86_64.dmg
+        path: target/x86_64-apple-darwin/release/Zublime-x86_64.dmg
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-macos-x86_64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-macos-x86_64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-macos-x86_64.gz
-        path: target/zed-remote-server-macos-x86_64.gz
+        name: zublime-remote-server-macos-x86_64.gz
+        path: target/zublime-remote-server-macos-x86_64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_windows_aarch64:
+    if: ${{ vars.ENABLE_ARM_BUILDS == 'true' }}
     needs:
     - check_style
     - run_tests_windows
-    - clippy_windows
-    runs-on: self-32vcpu-windows-2022
+    runs-on: windows-latest
     env:
       CARGO_INCREMENTAL: 0
+      CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
@@ -298,6 +305,7 @@ jobs:
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -305,11 +313,11 @@ jobs:
       run: script/bundle-windows.ps1 -Architecture aarch64
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
-    - name: '@actions/upload-artifact Zed-aarch64.exe'
+    - name: '@actions/upload-artifact Zublime-aarch64.exe'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-aarch64.exe
-        path: target/Zed-aarch64.exe
+        name: Zublime-aarch64.exe
+        path: target/Zublime-aarch64.exe
         if-no-files-found: error
     - name: '@actions/upload-artifact zed-remote-server-windows-aarch64.zip'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -322,10 +330,10 @@ jobs:
     needs:
     - check_style
     - run_tests_windows
-    - clippy_windows
-    runs-on: self-32vcpu-windows-2022
+    runs-on: windows-latest
     env:
       CARGO_INCREMENTAL: 0
+      CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
@@ -351,6 +359,7 @@ jobs:
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -358,11 +367,11 @@ jobs:
       run: script/bundle-windows.ps1 -Architecture x86_64
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
-    - name: '@actions/upload-artifact Zed-x86_64.exe'
+    - name: '@actions/upload-artifact Zublime-x86_64.exe'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-x86_64.exe
-        path: target/Zed-x86_64.exe
+        name: Zublime-x86_64.exe
+        path: target/Zublime-x86_64.exe
         if-no-files-found: error
     - name: '@actions/upload-artifact zed-remote-server-windows-x86_64.zip'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -375,8 +384,8 @@ jobs:
     needs:
     - check_style
     - run_tests_windows
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-32x64-ubuntu-2004
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: ubuntu-latest
     env:
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
@@ -409,8 +418,8 @@ jobs:
     needs:
     - check_style
     - run_tests_windows
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-mac-large
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: macos-latest
     env:
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
@@ -462,14 +471,33 @@ jobs:
     - bundle_mac_x86_64
     - bundle_windows_aarch64
     - bundle_windows_x86_64
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-4x8-ubuntu-2204
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions') && always() && !cancelled()
+    runs-on: ubuntu-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         clean: false
         fetch-depth: 0
+    - name: release::validate_required_builds
+      run: |-
+        if [ "${{ needs.bundle_linux_x86_64.result }}" != "success" ]; then
+          echo "bundle_linux_x86_64 did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_mac_aarch64.result }}" != "success" ]; then
+          echo "bundle_mac_aarch64 did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_mac_x86_64.result }}" != "success" ]; then
+          echo "bundle_mac_x86_64 did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_windows_x86_64.result }}" != "success" ]; then
+          echo "bundle_windows_x86_64 did not succeed."
+          exit 1
+        fi
+      shell: bash -euxo pipefail {0}
     - name: release::download_workflow_artifacts
       uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
       with:
@@ -480,18 +508,25 @@ jobs:
       run: |-
         mkdir -p release-artifacts/
 
-        mv ./artifacts/Zed-aarch64.dmg/Zed-aarch64.dmg release-artifacts/Zed-aarch64.dmg
-        mv ./artifacts/Zed-x86_64.dmg/Zed-x86_64.dmg release-artifacts/Zed-x86_64.dmg
-        mv ./artifacts/zed-linux-aarch64.tar.gz/zed-linux-aarch64.tar.gz release-artifacts/zed-linux-aarch64.tar.gz
-        mv ./artifacts/zed-linux-x86_64.tar.gz/zed-linux-x86_64.tar.gz release-artifacts/zed-linux-x86_64.tar.gz
-        mv ./artifacts/Zed-x86_64.exe/Zed-x86_64.exe release-artifacts/Zed-x86_64.exe
-        mv ./artifacts/Zed-aarch64.exe/Zed-aarch64.exe release-artifacts/Zed-aarch64.exe
-        mv ./artifacts/zed-remote-server-macos-aarch64.gz/zed-remote-server-macos-aarch64.gz release-artifacts/zed-remote-server-macos-aarch64.gz
-        mv ./artifacts/zed-remote-server-macos-x86_64.gz/zed-remote-server-macos-x86_64.gz release-artifacts/zed-remote-server-macos-x86_64.gz
-        mv ./artifacts/zed-remote-server-linux-aarch64.gz/zed-remote-server-linux-aarch64.gz release-artifacts/zed-remote-server-linux-aarch64.gz
-        mv ./artifacts/zed-remote-server-linux-x86_64.gz/zed-remote-server-linux-x86_64.gz release-artifacts/zed-remote-server-linux-x86_64.gz
-        mv ./artifacts/zed-remote-server-windows-aarch64.zip/zed-remote-server-windows-aarch64.zip release-artifacts/zed-remote-server-windows-aarch64.zip
-        mv ./artifacts/zed-remote-server-windows-x86_64.zip/zed-remote-server-windows-x86_64.zip release-artifacts/zed-remote-server-windows-x86_64.zip
+        if [ -f ./artifacts/Zublime-aarch64.dmg/Zublime-aarch64.dmg ]; then
+          mv ./artifacts/Zublime-aarch64.dmg/Zublime-aarch64.dmg release-artifacts/Zublime-aarch64.dmg
+        fi
+        mv ./artifacts/Zublime-x86_64.dmg/Zublime-x86_64.dmg release-artifacts/Zublime-x86_64.dmg
+        if [ -f ./artifacts/zublime-linux-aarch64.tar.gz/zublime-linux-aarch64.tar.gz ]; then
+          mv ./artifacts/zublime-linux-aarch64.tar.gz/zublime-linux-aarch64.tar.gz release-artifacts/zublime-linux-aarch64.tar.gz
+        fi
+        mv ./artifacts/zublime-linux-x86_64.tar.gz/zublime-linux-x86_64.tar.gz release-artifacts/zublime-linux-x86_64.tar.gz
+        mv ./artifacts/Zublime-x86_64.exe/Zublime-x86_64.exe release-artifacts/Zublime-x86_64.exe
+        if [ -f ./artifacts/Zublime-aarch64.exe/Zublime-aarch64.exe ]; then
+          mv ./artifacts/Zublime-aarch64.exe/Zublime-aarch64.exe release-artifacts/Zublime-aarch64.exe
+        fi
+        mv ./artifacts/zublime-remote-server-macos-aarch64.gz/zublime-remote-server-macos-aarch64.gz release-artifacts/zublime-remote-server-macos-aarch64.gz
+        mv ./artifacts/zublime-remote-server-macos-x86_64.gz/zublime-remote-server-macos-x86_64.gz release-artifacts/zublime-remote-server-macos-x86_64.gz
+        if [ -f ./artifacts/zublime-remote-server-linux-aarch64.gz/zublime-remote-server-linux-aarch64.gz ]; then
+          mv ./artifacts/zublime-remote-server-linux-aarch64.gz/zublime-remote-server-linux-aarch64.gz release-artifacts/zublime-remote-server-linux-aarch64.gz
+        fi
+        mv ./artifacts/zublime-remote-server-linux-x86_64.gz/zublime-remote-server-linux-x86_64.gz release-artifacts/zublime-remote-server-linux-x86_64.gz
+      shell: bash -euxo pipefail {0}
     - name: ./script/upload-nightly
       run: ./script/upload-nightly
       env:
@@ -525,7 +560,7 @@ jobs:
     - bundle_windows_aarch64
     - bundle_windows_x86_64
     if: failure()
-    runs-on: namespace-profile-2x4-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
     - name: release::send_slack_message
       run: |

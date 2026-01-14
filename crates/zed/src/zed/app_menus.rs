@@ -304,20 +304,21 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                 MenuItem::action(
                     "Documentation",
                     super::OpenBrowser {
-                        url: "https://zed.dev/docs".into(),
+                        url: "https://github.com/lydakis/zublime#readme".into(),
                     },
                 ),
                 MenuItem::action("Zublime Repository", feedback::OpenZedRepo),
                 MenuItem::action(
-                    "Zublime Twitter",
+                    "Zublime Website",
                     super::OpenBrowser {
-                        url: "https://twitter.com/zeddotdev".into(),
+                        url: "https://engineered.ooo".into(),
                     },
                 ),
                 MenuItem::action(
-                    "Join the Team",
+                    "Contributing Guide",
                     super::OpenBrowser {
-                        url: "https://zed.dev/jobs".into(),
+                        url: "https://github.com/lydakis/zublime/blob/main/CONTRIBUTING.md"
+                            .into(),
                     },
                 ),
             ],

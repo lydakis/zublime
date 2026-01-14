@@ -1,31 +1,29 @@
-# Zed
+# Zublime
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+[![Release](https://img.shields.io/github/v/release/lydakis/zublime?include_prereleases)](https://github.com/lydakis/zublime/releases)
+[![CI](https://github.com/lydakis/zublime/actions/workflows/run_tests.yml/badge.svg)](https://github.com/lydakis/zublime/actions/workflows/run_tests.yml)
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+Welcome to Zublime, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
 
 ---
 
 ### Installation
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+On macOS, Linux, and Windows you can [download Zublime directly](https://github.com/lydakis/zublime/releases) or install Zublime via your local package manager when available.
 
 Other platforms are not yet available:
 
 - Web ([tracking issue](https://github.com/zed-industries/zed/issues/5396))
 
-### Developing Zed
+### Developing Zublime
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+- [Building Zublime for macOS](./docs/src/development/macos.md)
+- [Building Zublime for Linux](./docs/src/development/linux.md)
+- [Building Zublime for Windows](./docs/src/development/windows.md)
 
 ### Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
-
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zublime.
 
 ### Licensing
 

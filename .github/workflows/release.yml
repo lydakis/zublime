@@ -4,14 +4,15 @@ name: release
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
+  ZED_WORKSPACE: ${{ github.workspace }}
 on:
   push:
     tags:
     - v*
 jobs:
   run_tests_mac:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-mac-large
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: macos-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -42,8 +43,8 @@ jobs:
         rm -rf ./../.cargo
     timeout-minutes: 60
   run_tests_linux:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-16x32-ubuntu-2204
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: ubuntu-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -88,8 +89,8 @@ jobs:
         - 5432:5432
         options: --health-cmd pg_isready --health-interval 500ms --health-timeout 5s --health-retries 10
   run_tests_windows:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: self-32vcpu-windows-2022
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: windows-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -180,8 +181,8 @@ jobs:
       shell: pwsh
     timeout-minutes: 60
   check_scripts:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-2x4-ubuntu-2404
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: ubuntu-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -205,8 +206,8 @@ jobs:
         fi
     timeout-minutes: 60
   create_draft_release:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
-    runs-on: namespace-profile-2x4-ubuntu-2404
+    if: (github.repository_owner == 'lydakis' || github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    runs-on: ubuntu-latest
     steps:
     - name: steps::checkout_repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -226,11 +227,12 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 60
   bundle_linux_aarch64:
+    if: ${{ vars.ENABLE_ARM_BUILDS == 'true' }}
     needs:
     - run_tests_linux
     - clippy_linux
     - check_scripts
-    runs-on: namespace-profile-8x32-ubuntu-2004-arm-m4
+    runs-on: ubuntu-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -241,6 +243,7 @@ jobs:
       with:
         clean: false
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -252,17 +255,18 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: ./script/bundle-linux
       run: ./script/bundle-linux
-    - name: '@actions/upload-artifact zed-linux-aarch64.tar.gz'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact zublime-linux-aarch64.tar.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-linux-aarch64.tar.gz
-        path: target/release/zed-linux-aarch64.tar.gz
+        name: zublime-linux-aarch64.tar.gz
+        path: target/release/zublime-linux-aarch64.tar.gz
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-linux-aarch64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-linux-aarch64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-linux-aarch64.gz
-        path: target/zed-remote-server-linux-aarch64.gz
+        name: zublime-remote-server-linux-aarch64.gz
+        path: target/zublime-remote-server-linux-aarch64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_linux_x86_64:
@@ -270,7 +274,7 @@ jobs:
     - run_tests_linux
     - clippy_linux
     - check_scripts
-    runs-on: namespace-profile-32x64-ubuntu-2004
+    runs-on: ubuntu-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -281,6 +285,7 @@ jobs:
       with:
         clean: false
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -292,17 +297,18 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: ./script/bundle-linux
       run: ./script/bundle-linux
-    - name: '@actions/upload-artifact zed-linux-x86_64.tar.gz'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact zublime-linux-x86_64.tar.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-linux-x86_64.tar.gz
-        path: target/release/zed-linux-x86_64.tar.gz
+        name: zublime-linux-x86_64.tar.gz
+        path: target/release/zublime-linux-x86_64.tar.gz
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-linux-x86_64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-linux-x86_64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-linux-x86_64.gz
-        path: target/zed-remote-server-linux-x86_64.gz
+        name: zublime-remote-server-linux-x86_64.gz
+        path: target/zublime-remote-server-linux-x86_64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_mac_aarch64:
@@ -310,7 +316,7 @@ jobs:
     - run_tests_mac
     - clippy_mac
     - check_scripts
-    runs-on: namespace-profile-mac-large
+    runs-on: macos-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -330,6 +336,7 @@ jobs:
       with:
         node-version: '20'
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -337,17 +344,18 @@ jobs:
       run: ./script/clear-target-dir-if-larger-than 300
     - name: run_bundling::bundle_mac::bundle_mac
       run: ./script/bundle-mac aarch64-apple-darwin
-    - name: '@actions/upload-artifact Zed-aarch64.dmg'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact Zublime-aarch64.dmg'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-aarch64.dmg
-        path: target/aarch64-apple-darwin/release/Zed-aarch64.dmg
+        name: Zublime-aarch64.dmg
+        path: target/aarch64-apple-darwin/release/Zublime-aarch64.dmg
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-macos-aarch64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-macos-aarch64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-macos-aarch64.gz
-        path: target/zed-remote-server-macos-aarch64.gz
+        name: zublime-remote-server-macos-aarch64.gz
+        path: target/zublime-remote-server-macos-aarch64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_mac_x86_64:
@@ -355,7 +363,7 @@ jobs:
     - run_tests_mac
     - clippy_mac
     - check_scripts
-    runs-on: namespace-profile-mac-large
+    runs-on: macos-latest
     env:
       CARGO_INCREMENTAL: 0
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
@@ -375,6 +383,7 @@ jobs:
       with:
         node-version: '20'
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -382,27 +391,30 @@ jobs:
       run: ./script/clear-target-dir-if-larger-than 300
     - name: run_bundling::bundle_mac::bundle_mac
       run: ./script/bundle-mac x86_64-apple-darwin
-    - name: '@actions/upload-artifact Zed-x86_64.dmg'
+      shell: bash -euxo pipefail {0}
+    - name: '@actions/upload-artifact Zublime-x86_64.dmg'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-x86_64.dmg
-        path: target/x86_64-apple-darwin/release/Zed-x86_64.dmg
+        name: Zublime-x86_64.dmg
+        path: target/x86_64-apple-darwin/release/Zublime-x86_64.dmg
         if-no-files-found: error
-    - name: '@actions/upload-artifact zed-remote-server-macos-x86_64.gz'
+    - name: '@actions/upload-artifact zublime-remote-server-macos-x86_64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-remote-server-macos-x86_64.gz
-        path: target/zed-remote-server-macos-x86_64.gz
+        name: zublime-remote-server-macos-x86_64.gz
+        path: target/zublime-remote-server-macos-x86_64.gz
         if-no-files-found: error
     timeout-minutes: 60
   bundle_windows_aarch64:
+    if: ${{ vars.ENABLE_ARM_BUILDS == 'true' }}
     needs:
     - run_tests_windows
     - clippy_windows
     - check_scripts
-    runs-on: self-32vcpu-windows-2022
+    runs-on: windows-latest
     env:
       CARGO_INCREMENTAL: 0
+      CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
@@ -420,6 +432,7 @@ jobs:
       with:
         clean: false
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -427,11 +440,11 @@ jobs:
       run: script/bundle-windows.ps1 -Architecture aarch64
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
-    - name: '@actions/upload-artifact Zed-aarch64.exe'
+    - name: '@actions/upload-artifact Zublime-aarch64.exe'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-aarch64.exe
-        path: target/Zed-aarch64.exe
+        name: Zublime-aarch64.exe
+        path: target/Zublime-aarch64.exe
         if-no-files-found: error
     - name: '@actions/upload-artifact zed-remote-server-windows-aarch64.zip'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -445,9 +458,10 @@ jobs:
     - run_tests_windows
     - clippy_windows
     - check_scripts
-    runs-on: self-32vcpu-windows-2022
+    runs-on: windows-latest
     env:
       CARGO_INCREMENTAL: 0
+      CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
@@ -465,6 +479,7 @@ jobs:
       with:
         clean: false
     - name: steps::setup_sentry
+      if: ${{ secrets.SENTRY_AUTH_TOKEN != "" }}
       uses: matbour/setup-sentry-cli@3e938c54b3018bdd019973689ef984e033b0454b
       with:
         token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -472,11 +487,11 @@ jobs:
       run: script/bundle-windows.ps1 -Architecture x86_64
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
-    - name: '@actions/upload-artifact Zed-x86_64.exe'
+    - name: '@actions/upload-artifact Zublime-x86_64.exe'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-x86_64.exe
-        path: target/Zed-x86_64.exe
+        name: Zublime-x86_64.exe
+        path: target/Zublime-x86_64.exe
         if-no-files-found: error
     - name: '@actions/upload-artifact zed-remote-server-windows-x86_64.zip'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -494,8 +509,32 @@ jobs:
     - bundle_mac_x86_64
     - bundle_windows_aarch64
     - bundle_windows_x86_64
-    runs-on: namespace-profile-4x8-ubuntu-2204
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
     steps:
+    - name: release::validate_required_builds
+      run: |-
+        if [ "${{ needs.create_draft_release.result }}" != "success" ]; then
+          echo "create_draft_release did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_linux_x86_64.result }}" != "success" ]; then
+          echo "bundle_linux_x86_64 did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_mac_aarch64.result }}" != "success" ]; then
+          echo "bundle_mac_aarch64 did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_mac_x86_64.result }}" != "success" ]; then
+          echo "bundle_mac_x86_64 did not succeed."
+          exit 1
+        fi
+        if [ "${{ needs.bundle_windows_x86_64.result }}" != "success" ]; then
+          echo "bundle_windows_x86_64 did not succeed."
+          exit 1
+        fi
+      shell: bash -euxo pipefail {0}
     - name: release::download_workflow_artifacts
       uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
       with:
@@ -506,50 +545,35 @@ jobs:
       run: |-
         mkdir -p release-artifacts/
 
-        mv ./artifacts/Zed-aarch64.dmg/Zed-aarch64.dmg release-artifacts/Zed-aarch64.dmg
-        mv ./artifacts/Zed-x86_64.dmg/Zed-x86_64.dmg release-artifacts/Zed-x86_64.dmg
-        mv ./artifacts/zed-linux-aarch64.tar.gz/zed-linux-aarch64.tar.gz release-artifacts/zed-linux-aarch64.tar.gz
-        mv ./artifacts/zed-linux-x86_64.tar.gz/zed-linux-x86_64.tar.gz release-artifacts/zed-linux-x86_64.tar.gz
-        mv ./artifacts/Zed-x86_64.exe/Zed-x86_64.exe release-artifacts/Zed-x86_64.exe
-        mv ./artifacts/Zed-aarch64.exe/Zed-aarch64.exe release-artifacts/Zed-aarch64.exe
-        mv ./artifacts/zed-remote-server-macos-aarch64.gz/zed-remote-server-macos-aarch64.gz release-artifacts/zed-remote-server-macos-aarch64.gz
-        mv ./artifacts/zed-remote-server-macos-x86_64.gz/zed-remote-server-macos-x86_64.gz release-artifacts/zed-remote-server-macos-x86_64.gz
-        mv ./artifacts/zed-remote-server-linux-aarch64.gz/zed-remote-server-linux-aarch64.gz release-artifacts/zed-remote-server-linux-aarch64.gz
-        mv ./artifacts/zed-remote-server-linux-x86_64.gz/zed-remote-server-linux-x86_64.gz release-artifacts/zed-remote-server-linux-x86_64.gz
-        mv ./artifacts/zed-remote-server-windows-aarch64.zip/zed-remote-server-windows-aarch64.zip release-artifacts/zed-remote-server-windows-aarch64.zip
-        mv ./artifacts/zed-remote-server-windows-x86_64.zip/zed-remote-server-windows-x86_64.zip release-artifacts/zed-remote-server-windows-x86_64.zip
-    - name: gh release upload "$GITHUB_REF_NAME" --repo=zed-industries/zed release-artifacts/*
-      run: gh release upload "$GITHUB_REF_NAME" --repo=zed-industries/zed release-artifacts/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  validate_release_assets:
-    needs:
-    - upload_release_assets
-    runs-on: namespace-profile-2x4-ubuntu-2404
-    steps:
-    - name: release::validate_release_assets
-      run: |
-        EXPECTED_ASSETS='["Zed-aarch64.dmg", "Zed-x86_64.dmg", "zed-linux-aarch64.tar.gz", "zed-linux-x86_64.tar.gz", "Zed-x86_64.exe", "Zed-aarch64.exe", "zed-remote-server-macos-aarch64.gz", "zed-remote-server-macos-x86_64.gz", "zed-remote-server-linux-aarch64.gz", "zed-remote-server-linux-x86_64.gz", "zed-remote-server-windows-aarch64.zip", "zed-remote-server-windows-x86_64.zip"]'
-        TAG="$GITHUB_REF_NAME"
-
-        ACTUAL_ASSETS=$(gh release view "$TAG" --repo=zed-industries/zed --json assets -q '[.assets[].name]')
-
-        MISSING_ASSETS=$(echo "$EXPECTED_ASSETS" | jq -r --argjson actual "$ACTUAL_ASSETS" '. - $actual | .[]')
-
-        if [ -n "$MISSING_ASSETS" ]; then
-            echo "Error: The following assets are missing from the release:"
-            echo "$MISSING_ASSETS"
-            exit 1
+        if [ -f ./artifacts/Zublime-aarch64.dmg/Zublime-aarch64.dmg ]; then
+          mv ./artifacts/Zublime-aarch64.dmg/Zublime-aarch64.dmg release-artifacts/Zublime-aarch64.dmg
         fi
-
-        echo "All expected assets are present in the release."
+        mv ./artifacts/Zublime-x86_64.dmg/Zublime-x86_64.dmg release-artifacts/Zublime-x86_64.dmg
+        if [ -f ./artifacts/zublime-linux-aarch64.tar.gz/zublime-linux-aarch64.tar.gz ]; then
+          mv ./artifacts/zublime-linux-aarch64.tar.gz/zublime-linux-aarch64.tar.gz release-artifacts/zublime-linux-aarch64.tar.gz
+        fi
+        mv ./artifacts/zublime-linux-x86_64.tar.gz/zublime-linux-x86_64.tar.gz release-artifacts/zublime-linux-x86_64.tar.gz
+        mv ./artifacts/Zublime-x86_64.exe/Zublime-x86_64.exe release-artifacts/Zublime-x86_64.exe
+        if [ -f ./artifacts/Zublime-aarch64.exe/Zublime-aarch64.exe ]; then
+          mv ./artifacts/Zublime-aarch64.exe/Zublime-aarch64.exe release-artifacts/Zublime-aarch64.exe
+        fi
+        mv ./artifacts/zublime-remote-server-macos-aarch64.gz/zublime-remote-server-macos-aarch64.gz release-artifacts/zublime-remote-server-macos-aarch64.gz
+        mv ./artifacts/zublime-remote-server-macos-x86_64.gz/zublime-remote-server-macos-x86_64.gz release-artifacts/zublime-remote-server-macos-x86_64.gz
+        if [ -f ./artifacts/zublime-remote-server-linux-aarch64.gz/zublime-remote-server-linux-aarch64.gz ]; then
+          mv ./artifacts/zublime-remote-server-linux-aarch64.gz/zublime-remote-server-linux-aarch64.gz release-artifacts/zublime-remote-server-linux-aarch64.gz
+        fi
+        mv ./artifacts/zublime-remote-server-linux-x86_64.gz/zublime-remote-server-linux-x86_64.gz release-artifacts/zublime-remote-server-linux-x86_64.gz
+      shell: bash -euxo pipefail {0}
+    - name: gh release upload "$GITHUB_REF_NAME" --repo=${GITHUB_REPOSITORY} release-artifacts/*
+      run: gh release upload "$GITHUB_REF_NAME" --repo=${GITHUB_REPOSITORY} release-artifacts/*
+      shell: bash -euxo pipefail {0}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   auto_release_preview:
     needs:
     - validate_release_assets
     if: startsWith(github.ref, 'refs/tags/v') && endsWith(github.ref, '-pre') && !endsWith(github.ref, '.0-pre')
-    runs-on: namespace-profile-2x4-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
     - id: get-app-token
       name: steps::authenticate_as_zippy
@@ -557,8 +581,9 @@ jobs:
       with:
         app-id: ${{ secrets.ZED_ZIPPY_APP_ID }}
         private-key: ${{ secrets.ZED_ZIPPY_APP_PRIVATE_KEY }}
-    - name: gh release edit "$GITHUB_REF_NAME" --repo=zed-industries/zed --draft=false
-      run: gh release edit "$GITHUB_REF_NAME" --repo=zed-industries/zed --draft=false
+    - name: gh release edit "$GITHUB_REF_NAME" --repo=${GITHUB_REPOSITORY} --draft=false
+      run: gh release edit "$GITHUB_REF_NAME" --repo=${GITHUB_REPOSITORY} --draft=false
+      shell: bash -euxo pipefail {0}
       env:
         GITHUB_TOKEN: ${{ steps.get-app-token.outputs.token }}
   push_release_update_notification:
@@ -567,21 +592,8 @@ jobs:
     - upload_release_assets
     - validate_release_assets
     - auto_release_preview
-    - run_tests_mac
-    - run_tests_linux
-    - run_tests_windows
-    - clippy_mac
-    - clippy_linux
-    - clippy_windows
-    - check_scripts
-    - bundle_linux_aarch64
-    - bundle_linux_x86_64
-    - bundle_mac_aarch64
-    - bundle_mac_x86_64
-    - bundle_windows_aarch64
-    - bundle_windows_x86_64
-    if: always()
-    runs-on: namespace-profile-2x4-ubuntu-2404
+    if: failure()
+    runs-on: ubuntu-latest
     steps:
     - id: generate-webhook-message
       name: release::generate_slack_message

@@ -2,20 +2,28 @@
 
 channel="$1"
 
-query=""
-case $channel in
-  stable)
-    ;;
-  preview)
-    query="&preview=1"
-    ;;
-  nightly)
-    query="&nightly=1"
-    ;;
-  *)
-    echo "this must be run on either of stable|preview|nightly release branches" >&2
-    exit 1
-    ;;
-esac
+repo="lydakis/zublime"
 
-curl -s "https://cloud.zed.dev/releases/$channel/latest/asset?asset=zed&os=macos&arch=aarch64" | jq -r .version
+if [ "$channel" = "stable" ]; then
+  tag=$(curl -s "https://api.github.com/repos/${repo}/releases/latest" | jq -r .tag_name)
+else
+  tag=$(curl -s "https://api.github.com/repos/${repo}/releases" | jq -r --arg channel "$channel" '
+    [ .[]
+      | select(.prerelease == true)
+      | select(.tag_name | test($channel))
+    ][0].tag_name // empty
+  ')
+
+  if [ -z "$tag" ]; then
+    tag=$(curl -s "https://api.github.com/repos/${repo}/releases" | jq -r '
+      [ .[] | select(.prerelease == true) ][0].tag_name // empty
+    ')
+  fi
+fi
+
+if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+  echo "No matching release tag found for channel '$channel'." >&2
+  exit 1
+fi
+
+echo "${tag#v}"

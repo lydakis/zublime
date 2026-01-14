@@ -7,7 +7,7 @@
 use gpui::App;
 use settings::Settings;
 
-use crate::ClientSettings;
+use crate::{ClientSettings, ZUBLIME_URL_SCHEME};
 
 fn server_url(cx: &App) -> &str {
     &ClientSettings::get_global(cx).server_url
@@ -69,5 +69,5 @@ pub fn edit_prediction_docs(cx: &App) -> String {
 }
 
 pub fn shared_agent_thread_url(session_id: &str) -> String {
-    format!("zed://agent/shared/{}", session_id)
+    format!("{ZUBLIME_URL_SCHEME}://agent/shared/{session_id}")
 }

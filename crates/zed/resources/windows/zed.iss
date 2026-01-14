@@ -2,10 +2,10 @@
 AppId={#AppId}
 AppName={#AppName}
 AppVerName={#AppDisplayName}
-AppPublisher=Zed Industries
-AppPublisherURL=https://www.zed.dev/
-AppSupportURL=https://www.zed.dev/
-AppUpdatesURL=https://www.zed.dev/
+AppPublisher=Engineered
+AppPublisherURL=https://engineered.ooo/
+AppSupportURL=https://engineered.ooo/
+AppUpdatesURL=https://engineered.ooo/
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
@@ -1256,6 +1256,10 @@ Root: HKCU; Subkey: "Software\Classes\Drive\shell\{#RegValueName}\command"; Valu
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:AddToPath|{app}\bin}"; Tasks: addtopath; Check: NeedsAddToPath(ExpandConstant('{app}\bin'))
 
 ; URI Scheme
+Root: HKCU; Subkey: "Software\Classes\zublime"; ValueType: "string"; ValueData: "URL:Zublime Protocol"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\zublime"; ValueType: "string"; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\zublime\DefaultIcon"; ValueType: "string"; ValueData: "{app}\Zed.exe,1"
+Root: HKCU; Subkey: "Software\Classes\zublime\shell\open\command"; ValueType: "string"; ValueData: """{app}\Zed.exe"" ""%1"""
 Root: HKCU; Subkey: "Software\Classes\zed"; ValueType: "string"; ValueData: "URL:zed Protocol"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\zed"; ValueType: "string"; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\zed\DefaultIcon"; ValueType: "string"; ValueData: "{app}\Zed.exe,1"

@@ -21,6 +21,7 @@ use onboarding::show_onboarding_view;
 use recent_projects::{RemoteSettings, open_remote_project};
 use remote::{RemoteConnectionOptions, WslConnectionOptions};
 use settings::Settings;
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
@@ -91,6 +92,12 @@ impl OpenRequest {
         }
 
         for url in request.urls {
+            let normalized_url = url
+                .strip_prefix("zublime://")
+                .map(|rest| Cow::Owned(format!("zed://{rest}")))
+                .unwrap_or_else(|| Cow::Borrowed(url.as_str()));
+            let url = normalized_url.as_ref();
+
             if let Some(server_name) = url.strip_prefix("zed-cli://") {
                 this.kind = Some(OpenRequestKind::CliConnection(connect_to_cli(server_name)?));
             } else if let Some(action_index) = url.strip_prefix("zed-dock-action://") {

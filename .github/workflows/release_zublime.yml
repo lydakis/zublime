@@ -1,0 +1,122 @@
+name: release_zublime
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v0.220.0)
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - preview
+          - nightly
+          - dev
+      prerelease:
+        description: Mark release as prerelease
+        required: true
+        default: false
+        type: boolean
+      draft:
+        description: Create draft release
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          prerelease: ${{ inputs.prerelease }}
+          draft: ${{ inputs.draft }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_linux:
+    needs: create_release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux deps
+        run: ./script/linux
+      - name: Install mold
+        run: ./script/install-mold
+      - name: Download WASI SDK
+        run: ./script/download-wasi-sdk
+      - name: Set release channel
+        run: echo "${{ inputs.channel }}" > crates/zed/RELEASE_CHANNEL
+      - name: Bundle Linux
+        run: ./script/bundle-linux
+      - name: Upload Linux artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            target/release/zublime-linux-*.tar.gz
+            target/zublime-remote-server-linux-*.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_macos:
+    needs: create_release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Set release channel
+        run: echo "${{ inputs.channel }}" > crates/zed/RELEASE_CHANNEL
+      - name: Bundle macOS
+        run: ./script/bundle-mac
+      - name: Upload macOS artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            target/*/release/Zublime-*.dmg
+            target/zublime-remote-server-macos-*.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_windows:
+    needs: create_release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Set release channel
+        shell: pwsh
+        run: Set-Content -Path crates/zed/RELEASE_CHANNEL -Value "${{ inputs.channel }}"
+      - name: Bundle Windows
+        shell: pwsh
+        env:
+          CI: ""
+        run: ./script/bundle-windows.ps1 -Architecture x86_64
+      - name: Upload Windows artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            target/Zublime-x86_64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

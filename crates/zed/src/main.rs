@@ -175,8 +175,24 @@ fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
 }
 static STARTUP_TIME: OnceLock<Instant> = OnceLock::new();
 
+#[cfg(target_os = "macos")]
+fn set_macos_process_name() {
+    use cocoa::base::nil;
+    use cocoa::foundation::{NSProcessInfo, NSString};
+    use objc::msg_send;
+
+    unsafe {
+        let name = NSString::alloc(nil).init_str("Zublime");
+        let process_info = NSProcessInfo::processInfo(nil);
+        let _: () = msg_send![process_info, setProcessName: name];
+    }
+}
+
 fn main() {
     STARTUP_TIME.get_or_init(|| Instant::now());
+
+    #[cfg(target_os = "macos")]
+    set_macos_process_name();
 
     #[cfg(unix)]
     util::prevent_root_execution();

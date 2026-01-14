@@ -278,7 +278,9 @@ jobs:
     - run_tests_windows
     runs-on: windows-latest
     env:
+      CARGO_HOME: C:\cargo
       CARGO_INCREMENTAL: 0
+      RUSTUP_HOME: C:\rustup
       CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
@@ -296,6 +298,11 @@ jobs:
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         clean: false
+    - name: steps::prepare_windows_paths
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path C:\cargo, C:\rustup | Out-Null
+        git config --global core.longpaths true
     - name: run_bundling::set_release_channel_to_nightly
       run: |
         $ErrorActionPreference = "Stop"
@@ -326,7 +333,9 @@ jobs:
     - run_tests_windows
     runs-on: windows-latest
     env:
+      CARGO_HOME: C:\cargo
       CARGO_INCREMENTAL: 0
+      RUSTUP_HOME: C:\rustup
       CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
@@ -344,6 +353,11 @@ jobs:
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         clean: false
+    - name: steps::prepare_windows_paths
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path C:\cargo, C:\rustup | Out-Null
+        git config --global core.longpaths true
     - name: run_bundling::set_release_channel_to_nightly
       run: |
         $ErrorActionPreference = "Stop"

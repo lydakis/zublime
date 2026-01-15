@@ -179,7 +179,7 @@ static STARTUP_TIME: OnceLock<Instant> = OnceLock::new();
 fn set_macos_process_name() {
     use cocoa::base::nil;
     use cocoa::foundation::{NSProcessInfo, NSString};
-    use objc::{msg_send, sel};
+    use objc::{msg_send, sel, sel_impl};
 
     unsafe {
         let name = NSString::alloc(nil).init_str("Zublime");

@@ -120,7 +120,7 @@ macos() {
         app_id="ooo.engineered.Zublime-Preview"
         ;;
       dev)
-        app="Zublime Dev.app"
+        app="Zublime.app"
         db_suffix="dev"
         app_id="ooo.engineered.Zublime-Dev"
         ;;

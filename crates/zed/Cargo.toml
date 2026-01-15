@@ -2,7 +2,7 @@
 description = "The fast, collaborative code editor."
 edition.workspace = true
 name = "zed"
-version = "0.1.0"
+version = "0.1.1"
 publish.workspace = true
 license = "GPL-3.0-or-later"
 authors = ["Zublime Team <hi@engineered.ooo>"]
@@ -266,12 +266,28 @@ repl = { workspace = true, features = ["test-support"] }
 [package.metadata.bundle]
 icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]
 identifier = "ooo.engineered.Zublime-Dev"
-name = "Zublime Dev"
+name = "Zublime"
+osx_minimum_system_version = "10.15.7"
+osx_info_plist_exts = ["resources/info/*"]
+osx_url_schemes = ["zublime", "zed"]
+
+[package.metadata.bundle.bin.zublime]
+icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]
+identifier = "ooo.engineered.Zublime-Dev"
+name = "Zublime"
 osx_minimum_system_version = "10.15.7"
 osx_info_plist_exts = ["resources/info/*"]
 osx_url_schemes = ["zublime", "zed"]
 
 [package.metadata.bundle-nightly]
+icon = ["resources/app-icon-nightly@2x.png", "resources/app-icon-nightly.png"]
+identifier = "ooo.engineered.Zublime-Nightly"
+name = "Zublime Nightly"
+osx_minimum_system_version = "10.15.7"
+osx_info_plist_exts = ["resources/info/*"]
+osx_url_schemes = ["zublime", "zed"]
+
+[package.metadata.bundle-nightly.bin.zublime]
 icon = ["resources/app-icon-nightly@2x.png", "resources/app-icon-nightly.png"]
 identifier = "ooo.engineered.Zublime-Nightly"
 name = "Zublime Nightly"
@@ -287,7 +303,23 @@ osx_minimum_system_version = "10.15.7"
 osx_info_plist_exts = ["resources/info/*"]
 osx_url_schemes = ["zublime", "zed"]
 
+[package.metadata.bundle-preview.bin.zublime]
+icon = ["resources/app-icon-preview@2x.png", "resources/app-icon-preview.png"]
+identifier = "ooo.engineered.Zublime-Preview"
+name = "Zublime Preview"
+osx_minimum_system_version = "10.15.7"
+osx_info_plist_exts = ["resources/info/*"]
+osx_url_schemes = ["zublime", "zed"]
+
 [package.metadata.bundle-stable]
+icon = ["resources/app-icon@2x.png", "resources/app-icon.png"]
+identifier = "ooo.engineered.Zublime"
+name = "Zublime"
+osx_minimum_system_version = "10.15.7"
+osx_info_plist_exts = ["resources/info/*"]
+osx_url_schemes = ["zublime", "zed"]
+
+[package.metadata.bundle-stable.bin.zublime]
 icon = ["resources/app-icon@2x.png", "resources/app-icon.png"]
 identifier = "ooo.engineered.Zublime"
 name = "Zublime"

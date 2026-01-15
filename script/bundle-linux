@@ -167,7 +167,7 @@ if [[ "$channel" == "preview" ]]; then
 elif [[ "$channel" == "nightly" ]]; then
   export APP_NAME="Zublime Nightly"
 elif [[ "$channel" == "dev" ]]; then
-  export APP_NAME="Zublime Devel"
+  export APP_NAME="Zublime"
 else
   export APP_NAME="Zublime"
 fi

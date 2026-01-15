@@ -4,7 +4,6 @@ name: release_nightly
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
-  ZED_WORKSPACE: ${{ github.workspace }}
 on:
   push:
     tags:
@@ -281,6 +280,7 @@ jobs:
       CARGO_HOME: C:\cargo
       CARGO_INCREMENTAL: 0
       RUSTUP_HOME: C:\rustup
+      ZED_WORKSPACE: ${{ github.workspace }}
       CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
@@ -342,6 +342,7 @@ jobs:
       CARGO_HOME: C:\cargo
       CARGO_INCREMENTAL: 0
       RUSTUP_HOME: C:\rustup
+      ZED_WORKSPACE: ${{ github.workspace }}
       CI: ""
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}

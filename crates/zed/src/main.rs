@@ -57,6 +57,8 @@ use workspace::{
     AppState, PathList, SerializedWorkspaceLocation, Toast, Workspace, WorkspaceSettings,
     WorkspaceStore, notifications::NotificationId,
 };
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
 use zed::{
     OpenListener, OpenRequest, RawOpenRequest, app_menus, build_window_options,
     derive_paths_with_position, edit_prediction_registry, handle_cli_connection,
@@ -179,7 +181,6 @@ static STARTUP_TIME: OnceLock<Instant> = OnceLock::new();
 fn set_macos_process_name() {
     use cocoa::base::nil;
     use cocoa::foundation::{NSProcessInfo, NSString};
-    use objc::{msg_send, sel, sel_impl};
 
     unsafe {
         let name = NSString::alloc(nil).init_str("Zublime");

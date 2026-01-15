@@ -297,15 +297,15 @@ function BuildInstaller {
         "dev" {
             $appId = "{{5223A396-4ED6-4B3A-9939-DAFD83B1082D}"
             $appIconName = "app-icon-dev"
-            $appName = "Zublime Dev"
-            $appDisplayName = "Zublime Dev"
+            $appName = "Zublime"
+            $appDisplayName = "Zublime"
             $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zublime-Editor-Dev-Instance-Mutex"
             $appExeName = "Zublime"
             $regValueName = "ZublimeDev"
             $appUserId = "ooo.engineered.Zublime.Dev"
-            $appShellNameShort = "Z&ublime Dev"
+            $appShellNameShort = "Z&ublime"
             $appAppxFullName = "ooo.engineered.Zublime.Dev_1.0.0.0_neutral__engineered"
         }
         default {

@@ -12,9 +12,9 @@ main() {
     release_tag="${ZUBLIME_RELEASE_TAG:-${ZED_RELEASE_TAG:-}}"
     # Use TMPDIR if available (for environments with non-standard temp directories)
     if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
-        temp="$(mktemp -d "$TMPDIR/zed-XXXXXX")"
+        temp="$(mktemp -d "$TMPDIR/zublime-XXXXXX")"
     else
-        temp="$(mktemp -d "/tmp/zed-XXXXXX")"
+        temp="$(mktemp -d "/tmp/zublime-XXXXXX")"
     fi
 
     if [ "$platform" = "Darwin" ]; then
@@ -127,8 +127,8 @@ linux() {
     mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
 
     # Link the binary
-    if [ -f "$HOME/.local/zublime$suffix.app/bin/zed" ]; then
-        ln -sf "$HOME/.local/zublime$suffix.app/bin/zed" "$HOME/.local/bin/zublime"
+    if [ -f "$HOME/.local/zublime$suffix.app/bin/zublime" ]; then
+        ln -sf "$HOME/.local/zublime$suffix.app/bin/zublime" "$HOME/.local/bin/zublime"
     else
         # support for versions before 0.139.x.
         ln -sf "$HOME/.local/zublime$suffix.app/bin/cli" "$HOME/.local/bin/zublime"
@@ -138,7 +138,7 @@ linux() {
     desktop_file_path="$HOME/.local/share/applications/${appid}.desktop"
     cp "$HOME/.local/zublime$suffix.app/share/applications/zublime$suffix.desktop" "${desktop_file_path}"
     sed -i "s|Icon=zublime|Icon=$HOME/.local/zublime$suffix.app/share/icons/hicolor/512x512/apps/zublime.png|g" "${desktop_file_path}"
-    sed -i "s|Exec=zed|Exec=$HOME/.local/zublime$suffix.app/bin/zed|g" "${desktop_file_path}"
+    sed -i "s|Exec=zublime|Exec=$HOME/.local/zublime$suffix.app/bin/zublime|g" "${desktop_file_path}"
 }
 
 macos() {

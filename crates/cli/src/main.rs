@@ -28,7 +28,14 @@ use walkdir::WalkDir;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use std::io::IsTerminal;
 
-const URL_PREFIX: [&'static str; 5] = ["zed://", "http://", "https://", "file://", "ssh://"];
+const URL_PREFIX: [&'static str; 6] = [
+    "zublime://",
+    "zed://",
+    "http://",
+    "https://",
+    "file://",
+    "ssh://",
+];
 
 struct Detect;
 
@@ -45,21 +52,21 @@ trait InstalledApp {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "zed",
+    name = "zublime",
     disable_version_flag = true,
-    before_help = "The Zed CLI binary.
-This CLI is a separate binary that invokes Zed.
+    before_help = "The Zublime CLI binary.
+This CLI is a separate binary that invokes Zublime.
 
 Examples:
-    `zed`
-          Simply opens Zed
-    `zed --foreground`
+    `zublime`
+          Simply opens Zublime
+    `zublime --foreground`
           Runs in foreground (shows all logs)
-    `zed path-to-your-project`
-          Open your project in Zed
-    `zed -n path-to-file `
+    `zublime path-to-your-project`
+          Open your project in Zublime
+    `zublime -n path-to-file `
           Open file/folder in a new window",
-    after_help = "To read from stdin, append '-', e.g. 'ps axf | zed -'"
+    after_help = "To read from stdin, append '-', e.g. 'ps axf | zublime -'"
 )]
 struct Args {
     /// Wait for all of the given paths to be opened/closed before exiting.
@@ -78,32 +85,32 @@ struct Args {
     reuse: bool,
     /// Sets a custom directory for all user data (e.g., database, extensions, logs).
     /// This overrides the default platform-specific data directory location:
-    #[cfg_attr(target_os = "macos", doc = "`~/Library/Application Support/Zed`.")]
-    #[cfg_attr(target_os = "windows", doc = "`%LOCALAPPDATA%\\Zed`.")]
+    #[cfg_attr(target_os = "macos", doc = "`~/Library/Application Support/Zublime`.")]
+    #[cfg_attr(target_os = "windows", doc = "`%LOCALAPPDATA%\\Zublime`.")]
     #[cfg_attr(
         not(any(target_os = "windows", target_os = "macos")),
-        doc = "`$XDG_DATA_HOME/zed`."
+        doc = "`$XDG_DATA_HOME/zublime`."
     )]
     #[arg(long, value_name = "DIR")]
     user_data_dir: Option<String>,
-    /// The paths to open in Zed (space-separated).
+    /// The paths to open in Zublime (space-separated).
     ///
     /// Use `path:line:column` syntax to open a file at the given line and column.
     paths_with_position: Vec<String>,
-    /// Print Zed's version and the app path.
+    /// Print Zublime's version and the app path.
     #[arg(short, long)]
     version: bool,
-    /// Run zed in the foreground (useful for debugging)
+    /// Run Zublime in the foreground (useful for debugging)
     #[arg(long)]
     foreground: bool,
-    /// Custom path to Zed.app or the zed binary
-    #[arg(long)]
+    /// Custom path to Zublime.app or the zublime binary
+    #[arg(long = "zublime", alias = "zed")]
     zed: Option<PathBuf>,
-    /// Run zed in dev-server mode
+    /// Run Zublime in dev-server mode
     #[arg(long)]
     dev_server_token: Option<String>,
     /// The username and WSL distribution to use when opening paths. If not specified,
-    /// Zed will attempt to open the paths directly.
+    /// Zublime will attempt to open the paths directly.
     ///
     /// The username is optional, and if not specified, the default user for the distribution
     /// will be used.
@@ -114,7 +121,7 @@ struct Args {
     #[cfg(target_os = "windows")]
     #[arg(long, value_name = "USER@DISTRO")]
     wsl: Option<String>,
-    /// Not supported in Zed CLI, only supported on Zed binary
+    /// Not supported in Zublime CLI, only supported on Zublime binary
     /// Will attempt to give the correct command to run
     #[arg(long)]
     system_specs: bool,
@@ -122,7 +129,7 @@ struct Args {
     /// When directories are provided, recurses into them and shows all changed files in a single multi-diff view.
     #[arg(long, action = clap::ArgAction::Append, num_args = 2, value_names = ["OLD_PATH", "NEW_PATH"])]
     diff: Vec<String>,
-    /// Uninstall Zed from user system
+    /// Uninstall Zublime from user system
     #[cfg(all(
         any(target_os = "linux", target_os = "macos"),
         not(feature = "no-bundled-uninstall")
@@ -131,7 +138,7 @@ struct Args {
     uninstall: bool,
 
     /// Used for SSH/Git password authentication, to remove the need for netcat as a dependency,
-    /// by having Zed act like netcat communicating over a Unix socket.
+    /// by having Zublime act like netcat communicating over a Unix socket.
     #[arg(long, hide = true)]
     askpass: Option<String>,
 }
@@ -471,7 +478,7 @@ fn main() -> Result<()> {
     }
     let args = Args::parse();
 
-    // `zed --askpass` Makes zed operate in nc/netcat mode for use with askpass
+    // `zublime --askpass` Makes Zublime operate in nc/netcat mode for use with askpass
     if let Some(socket) = &args.askpass {
         askpass::main(socket);
         return Ok(());
@@ -496,7 +503,7 @@ fn main() -> Result<()> {
     if args.system_specs {
         let path = app.path();
         let msg = [
-            "The `--system-specs` argument is not supported in the Zed CLI, only on Zed binary.",
+            "The `--system-specs` argument is not supported in the Zublime CLI, only on Zublime binary.",
             "To retrieve the system specs on the command line, run the following command:",
             &format!("{} --system-specs", path.display()),
         ];
@@ -527,8 +534,8 @@ fn main() -> Result<()> {
     }
 
     let (server, server_name) =
-        IpcOneShotServer::<IpcHandshake>::new().context("Handshake before Zed spawn")?;
-    let url = format!("zed-cli://{server_name}");
+        IpcOneShotServer::<IpcHandshake>::new().context("Handshake before Zublime spawn")?;
+    let url = format!("zublime-cli://{server_name}");
 
     let open_new_workspace = if args.new {
         Some(true)
@@ -543,7 +550,7 @@ fn main() -> Result<()> {
         {
             use collections::HashMap;
 
-            // On Linux, the desktop entry uses `cli` to spawn `zed`.
+            // On Linux, the desktop entry uses `cli` to spawn `zublime`.
             // We need to handle env vars correctly since std::env::vars() may not contain
             // project-specific vars (e.g. those set by direnv).
             // By setting env to None here, the LSP will use worktree env vars instead,
@@ -651,7 +658,7 @@ fn main() -> Result<()> {
             let exit_status = exit_status.clone();
             let user_data_dir_for_thread = user_data_dir.clone();
             move || {
-                let (_, handshake) = server.accept().context("Handshake after Zed spawn")?;
+                let (_, handshake) = server.accept().context("Handshake after Zublime spawn")?;
                 let (tx, rx) = (handshake.requests, handshake.responses);
 
                 #[cfg(target_os = "windows")]
@@ -803,10 +810,10 @@ mod linux {
                 let cli = env::current_exe()?;
                 let dir = cli.parent().context("no parent path for cli")?;
 
-                // libexec is the standard, lib/zed is for Arch (and other non-libexec distros),
-                // ./zed is for the target directory in development builds.
+                // libexec is the standard, lib/zublime is for Arch (and other non-libexec distros),
+                // ./zublime is for the target directory in development builds.
                 let possible_locations =
-                    ["../libexec/zed-editor", "../lib/zed/zed-editor", "./zed"];
+                    ["../libexec/zublime-editor", "../lib/zublime/zublime-editor", "./zublime"];
                 possible_locations
                     .iter()
                     .find_map(|p| dir.join(p).canonicalize().ok().filter(|path| path != &cli))
@@ -822,7 +829,7 @@ mod linux {
     impl InstalledApp for App {
         fn zed_version_string(&self) -> String {
             format!(
-                "Zed {}{}{} – {}",
+                "Zublime {}{}{} – {}",
                 if *release_channel::RELEASE_CHANNEL_NAME == "stable" {
                     "".to_string()
                 } else {
@@ -843,7 +850,7 @@ mod linux {
                 .unwrap_or_else(|| paths::data_dir().clone());
 
             let sock_path = data_dir.join(format!(
-                "zed-{}.sock",
+                "zublime-{}.sock",
                 *release_channel::RELEASE_CHANNEL_NAME
             ));
             let sock = UnixDatagram::unbound()?;
@@ -953,7 +960,7 @@ mod flatpak {
         if let Some(flatpak_dir) = get_flatpak_dir() {
             let mut args = vec!["/usr/bin/flatpak-spawn".into(), "--host".into()];
             args.append(&mut get_xdg_env_args());
-            args.push("--env=ZED_UPDATE_EXPLANATION=Please use flatpak to update zed".into());
+            args.push("--env=ZED_UPDATE_EXPLANATION=Please use flatpak to update Zublime".into());
             args.push(
                 format!(
                     "--env={EXTRA_LIB_ENV_NAME}={}",
@@ -961,17 +968,17 @@ mod flatpak {
                 )
                 .into(),
             );
-            args.push(flatpak_dir.join("bin").join("zed").into());
+            args.push(flatpak_dir.join("bin").join("zublime").into());
 
             let mut is_app_location_set = false;
             for arg in &env::args_os().collect::<Vec<_>>()[1..] {
                 args.push(arg.clone());
-                is_app_location_set |= arg == "--zed";
+                is_app_location_set |= arg == "--zublime";
             }
 
             if !is_app_location_set {
-                args.push("--zed".into());
-                args.push(flatpak_dir.join("libexec").join("zed-editor").into());
+                args.push("--zublime".into());
+                args.push(flatpak_dir.join("libexec").join("zublime-editor").into());
             }
 
             let error = exec::execvp("/usr/bin/flatpak-spawn", args);
@@ -982,11 +989,13 @@ mod flatpak {
 
     pub fn set_bin_if_no_escape(mut args: super::Args) -> super::Args {
         if env::var(NO_ESCAPE_ENV_NAME).is_ok()
-            && env::var("FLATPAK_ID").is_ok_and(|id| id.starts_with("dev.zed.Zed"))
+            && env::var("FLATPAK_ID").is_ok_and(|id| id.starts_with("ooo.engineered.Zublime"))
             && args.zed.is_none()
         {
-            args.zed = Some("/app/libexec/zed-editor".into());
-            unsafe { env::set_var("ZED_UPDATE_EXPLANATION", "Please use flatpak to update zed") };
+            args.zed = Some("/app/libexec/zublime-editor".into());
+            unsafe {
+                env::set_var("ZED_UPDATE_EXPLANATION", "Please use flatpak to update Zublime");
+            }
         }
         args
     }
@@ -997,7 +1006,7 @@ mod flatpak {
         }
 
         if let Ok(flatpak_id) = env::var("FLATPAK_ID") {
-            if !flatpak_id.starts_with("dev.zed.Zed") {
+            if !flatpak_id.starts_with("ooo.engineered.Zublime") {
                 return None;
             }
 
@@ -1069,7 +1078,7 @@ mod windows {
     impl InstalledApp for App {
         fn zed_version_string(&self) -> String {
             format!(
-                "Zed {}{}{} – {}",
+                "Zublime {}{}{} – {}",
                 if *release_channel::RELEASE_CHANNEL_NAME == "stable" {
                     "".to_string()
                 } else {
@@ -1138,9 +1147,13 @@ mod windows {
                 let cli = std::env::current_exe()?;
                 let dir = cli.parent().context("no parent path for cli")?;
 
-                // ../Zed.exe is the standard, lib/zed is for MSYS2, ./zed.exe is for the target
-                // directory in development builds.
-                let possible_locations = ["../Zed.exe", "../lib/zed/zed-editor.exe", "./zed.exe"];
+                // ../Zublime.exe is the standard, lib/zublime is for MSYS2, ./zublime.exe is for
+                // the target directory in development builds.
+                let possible_locations = [
+                    "../Zublime.exe",
+                    "../lib/zublime/zublime-editor.exe",
+                    "./zublime.exe",
+                ];
                 possible_locations
                     .iter()
                     .find_map(|p| dir.join(p).canonicalize().ok().filter(|path| path != &cli))
@@ -1237,7 +1250,7 @@ mod mac_os {
 
     impl InstalledApp for Bundle {
         fn zed_version_string(&self) -> String {
-            format!("Zed {} – {}", self.version(), self.path().display(),)
+            format!("Zublime {} – {}", self.version(), self.path().display(),)
         }
 
         fn launch(&self, url: String, user_data_dir: Option<&str>) -> anyhow::Result<()> {
@@ -1255,7 +1268,7 @@ mod mac_os {
                             kCFStringEncodingUTF8,
                             ptr::null(),
                         ));
-                        // equivalent to: open zed-cli:... -a /Applications/Zed\ Preview.app
+                        // equivalent to: open zublime-cli:... -a /Applications/Zublime\ Preview.app
                         let urls_to_open =
                             CFArray::from_copyable(&[url_to_open.as_concrete_TypeRef()]);
                         LSOpenFromURLSpec(
@@ -1282,7 +1295,7 @@ mod mac_os {
                         .parent()
                         .with_context(|| format!("Executable {executable:?} path has no parent"))?;
                     let subprocess_stdout_file = fs::File::create(
-                        executable_parent.join("zed_dev.log"),
+                        executable_parent.join("zublime_dev.log"),
                     )
                     .with_context(|| format!("Log file creation in {executable_parent:?}"))?;
                     let subprocess_stdin_file =
@@ -1314,7 +1327,7 @@ mod mac_os {
             user_data_dir: Option<&str>,
         ) -> io::Result<ExitStatus> {
             let path = match self {
-                Bundle::App { app_bundle, .. } => app_bundle.join("Contents/MacOS/zed"),
+                Bundle::App { app_bundle, .. } => app_bundle.join("Contents/MacOS/zublime"),
                 Bundle::LocalPath { executable, .. } => executable.clone(),
             };
 
@@ -1328,7 +1341,7 @@ mod mac_os {
 
         fn path(&self) -> PathBuf {
             match self {
-                Bundle::App { app_bundle, .. } => app_bundle.join("Contents/MacOS/zed"),
+                Bundle::App { app_bundle, .. } => app_bundle.join("Contents/MacOS/zublime"),
                 Bundle::LocalPath { executable, .. } => executable.clone(),
             }
         }

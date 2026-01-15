@@ -6,7 +6,7 @@ version = "0.1.0"
 publish.workspace = true
 license = "GPL-3.0-or-later"
 authors = ["Zublime Team <hi@engineered.ooo>"]
-default-run = "zed"
+default-run = "zublime"
 
 [lints]
 workspace = true
@@ -51,7 +51,7 @@ visual-tests = [
 ]
 
 [[bin]]
-name = "zed"
+name = "zublime"
 path = "src/main.rs"
 
 [[bin]]
@@ -255,7 +255,7 @@ agent_ui = { workspace = true, features = ["test-support"] }
 agent_ui_v2 = { workspace = true, features = ["test-support"] }
 search = { workspace = true, features = ["test-support"] }
 
-[package.metadata.bundle-dev]
+[package.metadata.bundle]
 icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]
 identifier = "ooo.engineered.Zublime-Dev"
 name = "Zublime Dev"

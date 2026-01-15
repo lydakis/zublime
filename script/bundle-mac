@@ -10,7 +10,7 @@ local_install=false
 can_code_sign=false
 
 # This must match the team in the provisioning profile.
-IDENTITY="Zed Industries, Inc."
+IDENTITY="Engineered"
 APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
 
 # Function for displaying help info
@@ -86,13 +86,13 @@ script/generate-licenses
 
 rustup target add $target_triple
 
-echo "Compiling zed binaries"
+echo "Compiling zublime binaries"
 cargo build ${build_flag} --package zed --package cli --target $target_triple
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 cargo build ${build_flag} --package remote_server --target $target_triple
 
-echo "Creating application bundle"
+printf '%s\n' "Creating application bundle"
 pushd crates/zed
 cp Cargo.toml Cargo.toml.backup
 sed \
@@ -100,7 +100,7 @@ sed \
     "s/package.metadata.bundle-${channel}/package.metadata.bundle/" \
     Cargo.toml
 
-app_path=$(cargo bundle ${build_flag} --target $target_triple --select-workspace-root | xargs)
+app_path=$(cargo bundle ${build_flag} --bin zublime --target $target_triple --select-workspace-root | xargs)
 
 mv Cargo.toml.backup Cargo.toml
 popd
@@ -203,7 +203,7 @@ function sign_app_binaries() {
         # sequence of codesign commands modeled after this example: https://developer.apple.com/forums/thread/701514
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zed" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zublime" -v
         /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}" -v
     else
         echo "One or more of the following variables are missing: MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD, APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER_ID"
@@ -296,9 +296,9 @@ function upload_debug_symbols() {
     if [ "$local_install" = true ]; then
         echo "local install; skipping sentry upload."
     elif [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
-        echo "Uploading zed debug symbols to sentry..."
-        exe_path="target/${target_triple}/release/Zed"
-        if ! dsymutil --flat "target/${target_triple}/${target_dir}/zed" 2> target/dsymutil.log; then
+        echo "Uploading zublime debug symbols to sentry..."
+        exe_path="target/${target_triple}/release/Zublime"
+        if ! dsymutil --flat "target/${target_triple}/${target_dir}/zublime" 2> target/dsymutil.log; then
             echo "dsymutil failed"
             cat target/dsymutil.log
             exit 1
@@ -310,12 +310,12 @@ function upload_debug_symbols() {
         fi
         # note: this uploads the unstripped binary which is needed because it contains
         # .eh_frame data for stack unwinding. see https://github.com/getsentry/symbolic/issues/783
-        sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
+        sentry-cli debug-files upload --include-sources --wait -p zublime -o zublime-dev \
         # Try uploading up to 3 times
         for attempt in 1 2 3; do
             echo "Sentry upload attempt $attempt..."
-            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
-                "target/${target_triple}/${target_dir}/zed.dwarf" \
+            if sentry-cli debug-files upload --include-sources --wait -p zublime -o zublime-dev \
+                "target/${target_triple}/${target_dir}/zublime.dwarf" \
                 "target/${target_triple}/${target_dir}/remote_server.dwarf"; then
                 break
             else
@@ -333,7 +333,7 @@ function upload_debug_symbols() {
 
 upload_debug_symbols
 
-cp target/${target_triple}/${target_dir}/zed "${app_path}/Contents/MacOS/zed"
+cp target/${target_triple}/${target_dir}/zublime "${app_path}/Contents/MacOS/zublime"
 cp target/${target_triple}/${target_dir}/cli "${app_path}/Contents/MacOS/cli"
 sign_app_binaries
 

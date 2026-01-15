@@ -26,10 +26,10 @@ parts:
 
     stage-packages:
       - libasound2t64
-      # snapcraft has a lint that this is unused, but without it Zed exits with
+      # snapcraft has a lint that this is unused, but without it Zublime exits with
       # "Missing Vulkan entry points: LibraryLoadFailure" in blade_graphics.
       - libvulkan1
-      # snapcraft has a lint that this is unused, but without it Zed exits with
+      # snapcraft has a lint that this is unused, but without it Zublime exits with
       # "NoWaylandLib" when run with Wayland.
       - libwayland-client0
       - libxcb1
@@ -53,7 +53,7 @@ parts:
 
 apps:
   zublime:
-    command: usr/bin/zed
+    command: usr/bin/zublime
     common-id: ooo.engineered.Zublime
     environment:
       ZED_BUNDLE_TYPE: snap

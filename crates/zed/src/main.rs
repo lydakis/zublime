@@ -149,7 +149,7 @@ fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
                 process::exit(1);
             };
 
-            let notification_id = "dev.zed.Oops";
+            let notification_id = "ooo.engineered.Zublime.Oops";
             proxy
                 .add_notification(
                     notification_id,
@@ -199,20 +199,20 @@ fn main() {
 
     let args = Args::parse();
 
-    // `zed --askpass` Makes zed operate in nc/netcat mode for use with askpass
+    // `zublime --askpass` Makes Zublime operate in nc/netcat mode for use with askpass
     #[cfg(not(target_os = "windows"))]
     if let Some(socket) = &args.askpass {
         askpass::main(socket);
         return;
     }
 
-    // `zed --crash-handler` Makes zed operate in minidump crash handler mode
+    // `zublime --crash-handler` Makes Zublime operate in minidump crash handler mode
     if let Some(socket) = &args.crash_handler {
         crashes::crash_server(socket.as_path());
         return;
     }
 
-    // `zed --nc` Makes zed operate in nc/netcat mode for use with MCP
+    // `zublime --nc` Makes Zublime operate in nc/netcat mode for use with MCP
     if let Some(socket) = &args.nc {
         match nc::main(socket) {
             Ok(()) => return,
@@ -232,7 +232,7 @@ fn main() {
         }
     }
 
-    // `zed --printenv` Outputs environment variables as JSON to stdout
+    // `zublime --printenv` Outputs environment variables as JSON to stdout
     if args.printenv {
         util::shell_env::print_env();
         return;
@@ -301,7 +301,7 @@ fn main() {
         .unwrap();
 
     log::info!(
-        "========== starting zed version {}, sha {} ==========",
+        "========== starting Zublime version {}, sha {} ==========",
         app_version,
         app_commit_sha
             .as_ref()
@@ -326,7 +326,7 @@ fn main() {
         .spawn(crashes::init(InitCrashHandler {
             session_id,
             zed_version: app_version.to_string(),
-            binary: "zed".to_string(),
+            binary: "zublime".to_string(),
             release_channel: release_channel::RELEASE_CHANNEL_NAME.clone(),
             commit_sha: app_commit_sha
                 .as_ref()
@@ -359,7 +359,7 @@ fn main() {
         }
     };
     if failed_single_instance_check {
-        println!("zed is already running");
+        println!("Zublime is already running");
         return;
     }
 
@@ -1445,14 +1445,14 @@ fn stdout_is_a_pty() -> bool {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "zed", disable_version_flag = true, max_term_width = 100)]
+#[command(name = "zublime", disable_version_flag = true, max_term_width = 100)]
 struct Args {
     /// A sequence of space-separated paths or urls that you want to open.
     ///
     /// Use `path:line:row` syntax to open a file at a specific location.
     /// Non-existing paths and directories will ignore `:line:row` suffix.
     ///
-    /// URLs can either be `file://` or `zublime://` (or `zed://`) scheme, or relative to <https://zed.dev>.
+    /// URLs can either be `file://` or `zublime://` (or `zed://`) scheme, or relative to <https://engineered.ooo>.
     paths_or_urls: Vec<String>,
 
     /// Pairs of file paths to diff. Can be specified multiple times.
@@ -1481,14 +1481,14 @@ struct Args {
     #[arg(long, value_name = "USER@DISTRO")]
     wsl: Option<String>,
 
-    /// Instructs zed to run as a dev server on this machine. (not implemented)
+    /// Instructs Zublime to run as a dev server on this machine. (not implemented)
     #[arg(long)]
     dev_server_token: Option<String>,
 
     /// Prints system specs.
     ///
     /// Useful for submitting issues on GitHub when encountering a bug that
-    /// prevents Zublime from starting, so you can't run `zed: copy system specs to
+    /// prevents Zublime from starting, so you can't run `zublime: copy system specs to
     /// clipboard`
     #[arg(long)]
     system_specs: bool,
@@ -1503,7 +1503,7 @@ struct Args {
     #[arg(long, hide = true)]
     crash_handler: Option<PathBuf>,
 
-    /// Run zed in the foreground, only used on Windows, to match the behavior on macOS.
+    /// Run Zublime in the foreground, only used on Windows, to match the behavior on macOS.
     #[arg(long)]
     #[cfg(target_os = "windows")]
     #[arg(hide = true)]
@@ -1549,6 +1549,9 @@ fn parse_url_arg(arg: &str, cx: &App) -> String {
         Ok(path) => format!("file://{}", path.display()),
         Err(_) => {
             if arg.starts_with("file://")
+                || arg.starts_with("zublime://")
+                || arg.starts_with("zublime-cli://")
+                || arg.starts_with("zed://")
                 || arg.starts_with("zed-cli://")
                 || arg.starts_with("ssh://")
                 || parse_zed_link(arg, cx).is_some()

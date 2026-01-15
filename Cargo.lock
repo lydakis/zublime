@@ -20717,7 +20717,7 @@ dependencies = [
 
 [[package]]
 name = "zed"
-version = "0.220.0"
+version = "0.1.0"
 dependencies = [
  "acp_thread",
  "acp_tools",
@@ -20745,6 +20745,7 @@ dependencies = [
  "cli",
  "client",
  "clock",
+ "cocoa 0.26.0",
  "codestral",
  "collab_ui",
  "collections",
@@ -20807,6 +20808,7 @@ dependencies = [
  "nc",
  "node_runtime",
  "notifications",
+ "objc",
  "onboarding",
  "outline",
  "outline_panel",

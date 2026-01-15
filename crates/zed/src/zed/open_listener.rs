@@ -92,10 +92,15 @@ impl OpenRequest {
         }
 
         for url in request.urls {
-            let normalized_url = url
-                .strip_prefix("zublime://")
-                .map(|rest| Cow::Owned(format!("zed://{rest}")))
-                .unwrap_or_else(|| Cow::Borrowed(url.as_str()));
+            let normalized_url = if let Some(rest) = url.strip_prefix("zublime://") {
+                Cow::Owned(format!("zed://{rest}"))
+            } else if let Some(rest) = url.strip_prefix("zublime-cli://") {
+                Cow::Owned(format!("zed-cli://{rest}"))
+            } else if let Some(rest) = url.strip_prefix("zublime-dock-action://") {
+                Cow::Owned(format!("zed-dock-action://{rest}"))
+            } else {
+                Cow::Borrowed(url.as_str())
+            };
             let url = normalized_url.as_ref();
 
             if let Some(server_name) = url.strip_prefix("zed-cli://") {
@@ -271,7 +276,7 @@ pub fn listen_for_cli_connections(opener: OpenListener) -> Result<()> {
     use release_channel::RELEASE_CHANNEL_NAME;
     use std::os::unix::net::UnixDatagram;
 
-    let sock_path = paths::data_dir().join(format!("zed-{}.sock", *RELEASE_CHANNEL_NAME));
+    let sock_path = paths::data_dir().join(format!("zublime-{}.sock", *RELEASE_CHANNEL_NAME));
     // remove the socket if the process listening on it has died
     if let Err(e) = UnixDatagram::unbound()?.connect(&sock_path)
         && e.kind() == std::io::ErrorKind::ConnectionRefused

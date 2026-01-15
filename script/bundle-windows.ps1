@@ -124,9 +124,9 @@ function GenerateLicenses {
 
 function BuildZedAndItsFriends {
     Write-Output "Building Zublime and its friends, for channel: $channel"
-    # Build zed.exe, cli.exe and auto_update_helper.exe
+    # Build zublime.exe, cli.exe and auto_update_helper.exe
     cargo build --release --package zed --package cli --package auto_update_helper --target $target
-    Copy-Item -Path ".\$CargoOutDir\zed.exe" -Destination "$innoDir\Zed.exe" -Force
+    Copy-Item -Path ".\$CargoOutDir\zublime.exe" -Destination "$innoDir\Zublime.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\cli.exe" -Destination "$innoDir\cli.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\auto_update_helper.exe" -Destination "$innoDir\auto_update_helper.exe" -Force
     # Build explorer_command_injector.dll
@@ -146,13 +146,13 @@ function BuildZedAndItsFriends {
 
 function ZipZedAndItsFriendsDebug {
     $items = @(
-        ".\$CargoOutDir\zed.pdb",
+        ".\$CargoOutDir\zublime.pdb",
         ".\$CargoOutDir\cli.pdb",
         ".\$CargoOutDir\auto_update_helper.pdb",
         ".\$CargoOutDir\explorer_command_injector.pdb"
     )
 
-    Compress-Archive -Path $items -DestinationPath ".\$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip" -Force
+    Compress-Archive -Path $items -DestinationPath ".\$CargoOutDir\zublime-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip" -Force
 }
 
 
@@ -166,10 +166,10 @@ function UploadToSentry {
         Write-Output "missing SENTRY_AUTH_TOKEN. skipping sentry upload."
         return
     }
-    Write-Output "Uploading zed debug symbols to sentry..."
+    Write-Output "Uploading zublime debug symbols to sentry..."
     for ($i = 1; $i -le 3; $i++) {
         try {
-            sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev $CargoOutDir
+            sentry-cli debug-files upload --include-sources --wait -p zublime -o zublime-dev $CargoOutDir
             break
         }
         catch {
@@ -207,7 +207,7 @@ function SignZedAndItsFriends {
         return
     }
 
-    $files = "$innoDir\Zed.exe,$innoDir\cli.exe,$innoDir\auto_update_helper.exe,$innoDir\zed_explorer_command_injector.dll,$innoDir\zed_explorer_command_injector.appx"
+    $files = "$innoDir\Zublime.exe,$innoDir\cli.exe,$innoDir\auto_update_helper.exe,$innoDir\zed_explorer_command_injector.dll,$innoDir\zed_explorer_command_injector.appx"
     & "$innoDir\sign.ps1" $files
 }
 
@@ -231,8 +231,8 @@ function DownloadConpty {
 function CollectFiles {
     Move-Item -Path "$innoDir\zed_explorer_command_injector.appx" -Destination "$innoDir\appx\zed_explorer_command_injector.appx" -Force
     Move-Item -Path "$innoDir\zed_explorer_command_injector.dll" -Destination "$innoDir\appx\zed_explorer_command_injector.dll" -Force
-    Move-Item -Path "$innoDir\cli.exe" -Destination "$innoDir\bin\zed.exe" -Force
-    Move-Item -Path "$innoDir\zed.sh" -Destination "$innoDir\bin\zed" -Force
+    Move-Item -Path "$innoDir\cli.exe" -Destination "$innoDir\bin\zublime.exe" -Force
+    Move-Item -Path "$innoDir\zed.sh" -Destination "$innoDir\bin\zublime" -Force
     Move-Item -Path "$innoDir\auto_update_helper.exe" -Destination "$innoDir\tools\auto_update_helper.exe" -Force
     if($Architecture -eq "aarch64") {
         New-Item -Type Directory -Path "$innoDir\arm64" -Force
@@ -260,7 +260,7 @@ function BuildInstaller {
             $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zublime-Editor-Stable-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Zublime"
             $regValueName = "Zublime"
             $appUserId = "ooo.engineered.Zublime"
             $appShellNameShort = "Z&ublime"
@@ -274,7 +274,7 @@ function BuildInstaller {
             $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zublime-Editor-Preview-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Zublime"
             $regValueName = "ZublimePreview"
             $appUserId = "ooo.engineered.Zublime.Preview"
             $appShellNameShort = "Z&ublime Preview"
@@ -288,7 +288,7 @@ function BuildInstaller {
             $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zublime-Editor-Nightly-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Zublime"
             $regValueName = "ZublimeNightly"
             $appUserId = "ooo.engineered.Zublime.Nightly"
             $appShellNameShort = "Z&ublime Nightly"
@@ -302,7 +302,7 @@ function BuildInstaller {
             $appSetupName = "Zublime-$Architecture"
             # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
             $appMutex = "Zublime-Editor-Dev-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Zublime"
             $regValueName = "ZublimeDev"
             $appUserId = "ooo.engineered.Zublime.Dev"
             $appShellNameShort = "Z&ublime Dev"
@@ -365,8 +365,8 @@ function BuildInstaller {
 
 ParseZedWorkspace
 $innoDir = "$env:ZED_WORKSPACE\inno\$Architecture"
-$debugArchive = "$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip"
-$debugStoreKey = "$env:ZED_RELEASE_CHANNEL/zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip"
+$debugArchive = "$CargoOutDir\zublime-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip"
+$debugStoreKey = "$env:ZED_RELEASE_CHANNEL/zublime-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip"
 
 CheckEnvironmentVariables
 PrepareForBundle

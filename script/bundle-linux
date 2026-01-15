@@ -89,13 +89,13 @@ if ! command -v sentry-cli >/dev/null 2>&1; then
     echo "install with: 'curl -sL https://sentry.io/get-cli | bash'"
 else
     if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
-        echo "Uploading zed debug symbols to sentry..."
+        echo "Uploading zublime debug symbols to sentry..."
         # note: this uploads the unstripped binary which is needed because it contains
         # .eh_frame data for stack unwinding. see https://github.com/getsentry/symbolic/issues/783
         for attempt in 1 2 3; do
             echo "Attempting sentry upload (attempt $attempt/3)..."
-            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
-                "${target_dir}/${target_triple}"/release/zed \
+            if sentry-cli debug-files upload --include-sources --wait -p zublime -o zublime-dev \
+                "${target_dir}/${target_triple}"/release/zublime \
                 "${target_dir}/${remote_server_triple}"/release/remote_server; then
                 echo "Sentry upload successful on attempt $attempt"
                 break
@@ -112,7 +112,7 @@ else
 fi
 
 # Strip debug symbols and save them for upload to DigitalOcean
-objcopy --strip-debug "${target_dir}/${target_triple}/release/zed"
+objcopy --strip-debug "${target_dir}/${target_triple}/release/zublime"
 objcopy --strip-debug "${target_dir}/${target_triple}/release/cli"
 objcopy --strip-debug "${target_dir}/${remote_server_triple}/release/remote_server"
 
@@ -137,12 +137,12 @@ zed_dir="${temp_dir}/zublime$suffix.app"
 
 # Binary
 mkdir -p "${zed_dir}/bin" "${zed_dir}/libexec"
-cp "${target_dir}/${target_triple}/release/zed" "${zed_dir}/libexec/zed-editor"
-cp "${target_dir}/${target_triple}/release/cli" "${zed_dir}/bin/zed"
+cp "${target_dir}/${target_triple}/release/zublime" "${zed_dir}/libexec/zublime-editor"
+cp "${target_dir}/${target_triple}/release/cli" "${zed_dir}/bin/zublime"
 
 # Libs
 find_libs() {
-    ldd ${target_dir}/${target_triple}/release/zed |\
+    ldd ${target_dir}/${target_triple}/release/zublime |\
         cut -d' ' -f3 |\
         grep -v '\<\(libstdc++.so\|libc.so\|libgcc_s.so\|libm.so\|libpthread.so\|libdl.so\|libasound.so\)'
 }
@@ -159,7 +159,7 @@ cp "crates/zed/resources/app-icon$suffix@2x.png" "${zed_dir}/share/icons/hicolor
 
 # .desktop
 export DO_STARTUP_NOTIFY="true"
-export APP_CLI="zed"
+export APP_CLI="zublime"
 export APP_ICON="zublime"
 export APP_ARGS="%U"
 if [[ "$channel" == "preview" ]]; then

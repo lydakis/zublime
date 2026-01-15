@@ -93,7 +93,7 @@ linux() {
     rm -rf "$HOME/.local/share/zublime/db/0-$db_suffix"
 
     # Remove socket file
-    rm -f "$HOME/.local/share/zublime/zed-$db_suffix.sock"
+    rm -f "$HOME/.local/share/zublime/zublime-$db_suffix.sock"
 
     # Remove the entire Zublime directory if no installations remain
     if check_remaining_installations; then

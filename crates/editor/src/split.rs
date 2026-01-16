@@ -45,7 +45,8 @@ pub struct SplittableEditor {
     secondary: Option<SecondaryEditor>,
     panes: PaneGroup,
     workspace: WeakEntity<Workspace>,
-    is_syncing_scroll: bool,
+    ignore_next_primary_scroll_event: bool,
+    ignore_next_secondary_scroll_event: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -120,7 +121,8 @@ impl SplittableEditor {
                     this.expand_excerpts(excerpt_ids.iter().copied(), *lines, *direction, cx);
                 }
                 EditorEvent::ScrollPositionChanged { local, .. } if *local => {
-                    if this.is_syncing_scroll {
+                    if this.ignore_next_primary_scroll_event {
+                        this.ignore_next_primary_scroll_event = false;
                         return;
                     }
                     let Some(secondary) = &this.secondary else {
@@ -128,12 +130,13 @@ impl SplittableEditor {
                     };
                     let scroll_position =
                         editor.update(cx, |editor, cx| editor.scroll_position(cx));
-                    this.is_syncing_scroll = true;
-                    secondary.editor.update(cx, |secondary_editor, cx| {
-                        secondary_editor
-                            .set_scroll_position_internal(scroll_position, false, false, window, cx);
+                    this.ignore_next_secondary_scroll_event = true;
+                    let was_scrolled = secondary.editor.update(cx, |secondary_editor, cx| {
+                        secondary_editor.set_scroll_position(scroll_position, window, cx)
                     });
-                    this.is_syncing_scroll = false;
+                    if !was_scrolled.0 {
+                        this.ignore_next_secondary_scroll_event = false;
+                    }
                 }
                 EditorEvent::SelectionsChanged { .. } => {
                     if let Some(secondary) = &mut this.secondary {
@@ -164,7 +167,8 @@ impl SplittableEditor {
             secondary: None,
             panes,
             workspace: workspace.downgrade(),
-            is_syncing_scroll: false,
+            ignore_next_primary_scroll_event: false,
+            ignore_next_secondary_scroll_event: false,
             _subscriptions: subscriptions,
         }
     }
@@ -244,17 +248,19 @@ impl SplittableEditor {
                     cx.emit(event.clone());
                 }
                 EditorEvent::ScrollPositionChanged { local, .. } if *local => {
-                    if this.is_syncing_scroll {
+                    if this.ignore_next_secondary_scroll_event {
+                        this.ignore_next_secondary_scroll_event = false;
                         return;
                     }
                     let scroll_position =
                         editor.update(cx, |editor, cx| editor.scroll_position(cx));
-                    this.is_syncing_scroll = true;
-                    this.primary_editor.update(cx, |primary_editor, cx| {
-                        primary_editor
-                            .set_scroll_position_internal(scroll_position, false, false, window, cx);
+                    this.ignore_next_primary_scroll_event = true;
+                    let was_scrolled = this.primary_editor.update(cx, |primary_editor, cx| {
+                        primary_editor.set_scroll_position(scroll_position, window, cx)
                     });
-                    this.is_syncing_scroll = false;
+                    if !was_scrolled.0 {
+                        this.ignore_next_primary_scroll_event = false;
+                    }
                 }
                 _ => cx.emit(event.clone()),
             },

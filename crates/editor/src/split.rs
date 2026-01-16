@@ -130,7 +130,8 @@ impl SplittableEditor {
                         editor.update(cx, |editor, cx| editor.scroll_position(cx));
                     this.is_syncing_scroll = true;
                     secondary.editor.update(cx, |secondary_editor, cx| {
-                        secondary_editor.set_scroll_position(scroll_position, window, cx);
+                        secondary_editor
+                            .set_scroll_position_internal(scroll_position, false, false, window, cx);
                     });
                     this.is_syncing_scroll = false;
                 }
@@ -250,7 +251,8 @@ impl SplittableEditor {
                         editor.update(cx, |editor, cx| editor.scroll_position(cx));
                     this.is_syncing_scroll = true;
                     this.primary_editor.update(cx, |primary_editor, cx| {
-                        primary_editor.set_scroll_position(scroll_position, window, cx);
+                        primary_editor
+                            .set_scroll_position_internal(scroll_position, false, false, window, cx);
                     });
                     this.is_syncing_scroll = false;
                 }

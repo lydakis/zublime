@@ -612,62 +612,265 @@ async fn open_local_workspace(
     app_state: &Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> bool {
-    let paths_with_position =
-        derive_paths_with_position(app_state.fs.as_ref(), workspace_paths).await;
+    let paths_with_position = derive_paths_with_position(app_state.fs.as_ref(), workspace_paths)
+        .await;
 
-    // If reuse flag is passed, open a new workspace in an existing window.
-    let (open_new_workspace, replace_window) = if reuse {
-        (
-            Some(true),
-            cx.update(|cx| workspace::local_workspace_windows(cx).into_iter().next()),
-        )
-    } else {
-        (open_new_workspace, None)
-    };
-
-    let (workspace, items) = match open_paths_with_positions(
-        &paths_with_position,
-        &diff_paths,
-        diff_all,
-        app_state.clone(),
-        workspace::OpenOptions {
-            open_new_workspace,
-            replace_window,
-            prefer_focused_window: wait,
-            env: env.cloned(),
-            ..Default::default()
-        },
-        cx,
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(error) => {
-            responses
-                .send(CliResponse::Stderr {
-                    message: format!("error opening {paths_with_position:?}: {error}"),
-                })
-                .log_err();
-            return true;
+    let mut dir_roots = Vec::new();
+    let mut file_entries = Vec::new();
+    let mut diff_entries = Vec::new();
+    for diff_pair in &diff_paths {
+        let left_path = PathBuf::from(&diff_pair[0]);
+        let right_path = PathBuf::from(&diff_pair[1]);
+        let left_canonical = app_state
+            .fs
+            .canonicalize(&left_path)
+            .await
+            .unwrap_or(left_path);
+        let right_canonical = app_state
+            .fs
+            .canonicalize(&right_path)
+            .await
+            .unwrap_or(right_path);
+        diff_entries.push((diff_pair, left_canonical, right_canonical));
+    }
+    for path_with_position in paths_with_position {
+        let canonical = app_state
+            .fs
+            .canonicalize(&path_with_position.path)
+            .await
+            .unwrap_or(path_with_position.path.clone());
+        if app_state.fs.is_dir(&canonical).await {
+            dir_roots.push(canonical);
+        } else {
+            file_entries.push((path_with_position, canonical));
         }
-    };
+    }
+
+    if dir_roots.is_empty() {
+        let file_paths_with_position = file_entries
+            .into_iter()
+            .map(|(path_with_position, _)| path_with_position)
+            .collect::<Vec<_>>();
+
+        // If reuse flag is passed, open a new workspace in an existing window.
+        let (open_new_workspace, replace_window) = if reuse {
+            (
+                Some(true),
+                cx.update(|cx| workspace::local_workspace_windows(cx).into_iter().next()),
+            )
+        } else {
+            (open_new_workspace, None)
+        };
+
+        let (workspace, items) = match open_paths_with_positions(
+            &file_paths_with_position,
+            &diff_paths,
+            app_state.clone(),
+            workspace::OpenOptions {
+                open_new_workspace,
+                replace_window,
+                prefer_focused_window: wait,
+                env: env.cloned(),
+                ..Default::default()
+            },
+            cx,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                responses
+                    .send(CliResponse::Stderr {
+                        message: format!("error opening {file_paths_with_position:?}: {error}"),
+                    })
+                    .log_err();
+                return true;
+            }
+        };
+
+        let mut errored = false;
+        let mut item_release_futures = Vec::new();
+        let mut subscriptions = Vec::new();
+
+        // If --wait flag is used with no paths, or a directory, then wait until
+        // the entire workspace is closed.
+        if wait {
+            let mut wait_for_window_close =
+                file_paths_with_position.is_empty() && diff_paths.is_empty();
+            for path_with_position in &file_paths_with_position {
+                if app_state.fs.is_dir(&path_with_position.path).await {
+                    wait_for_window_close = true;
+                    break;
+                }
+            }
+
+            if wait_for_window_close {
+                let (release_tx, release_rx) = oneshot::channel();
+                item_release_futures.push(release_rx);
+                subscriptions.push(workspace.update(cx, |_, _, cx| {
+                    cx.on_release(move |_, _| {
+                        let _ = release_tx.send(());
+                    })
+                }));
+            }
+        }
+
+        for item in items {
+            match item {
+                Some(Ok(item)) => {
+                    if wait {
+                        let (release_tx, release_rx) = oneshot::channel();
+                        item_release_futures.push(release_rx);
+                        subscriptions.push(Ok(cx.update(|cx| {
+                            item.on_release(
+                                cx,
+                                Box::new(move |_| {
+                                    release_tx.send(()).ok();
+                                }),
+                            )
+                        })));
+                    }
+                }
+                Some(Err(err)) => {
+                    responses
+                        .send(CliResponse::Stderr {
+                            message: err.to_string(),
+                        })
+                        .log_err();
+                    errored = true;
+                }
+                None => {}
+            }
+        }
+
+        if wait {
+            let wait = async move {
+                let _subscriptions = subscriptions;
+                let _ = future::try_join_all(item_release_futures).await;
+            }
+            .fuse();
+            futures::pin_mut!(wait);
+
+            let background = cx.background_executor().clone();
+            loop {
+                // Repeatedly check if CLI is still open to avoid wasting resources
+                // waiting for files or workspaces to close.
+                let mut timer = background.timer(Duration::from_secs(1)).fuse();
+                futures::select_biased! {
+                    _ = wait => break,
+                    _ = timer => {
+                        if responses.send(CliResponse::Ping).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return errored;
+    }
+
+    let mut dir_groups = dir_roots
+        .iter()
+        .cloned()
+        .map(|root| (root, Vec::new()))
+        .collect::<Vec<_>>();
+    let mut diff_groups = vec![Vec::<[String; 2]>::new(); dir_roots.len()];
+    let mut unmatched_files = Vec::new();
+    let mut unmatched_diffs = Vec::new();
+
+    for (path_with_position, canonical_path) in file_entries {
+        let mut best_index = None;
+        let mut best_len = 0usize;
+        for (index, root) in dir_roots.iter().enumerate() {
+            if canonical_path.starts_with(root) {
+                let len = root.components().count();
+                if len > best_len {
+                    best_len = len;
+                    best_index = Some(index);
+                }
+            }
+        }
+
+        if let Some(index) = best_index {
+            dir_groups[index].1.push(path_with_position);
+        } else {
+            unmatched_files.push(path_with_position);
+        }
+    }
 
     let mut errored = false;
     let mut item_release_futures = Vec::new();
     let mut subscriptions = Vec::new();
-
-    // If --wait flag is used with no paths, or a directory, then wait until
-    // the entire workspace is closed.
-    if wait {
-        let mut wait_for_window_close = paths_with_position.is_empty() && diff_paths.is_empty();
-        for path_with_position in &paths_with_position {
-            if app_state.fs.is_dir(&path_with_position.path).await {
-                wait_for_window_close = true;
-                break;
+    for (diff_pair, left_path, right_path) in diff_entries {
+        let mut left_index = None;
+        let mut left_len = 0usize;
+        let mut right_index = None;
+        let mut right_len = 0usize;
+        for (index, root) in dir_roots.iter().enumerate() {
+            let len = root.components().count();
+            if left_path.starts_with(root) && len > left_len {
+                left_len = len;
+                left_index = Some(index);
+            }
+            if right_path.starts_with(root) && len > right_len {
+                right_len = len;
+                right_index = Some(index);
             }
         }
 
-        if wait_for_window_close {
+        let target_index = match (left_index, right_index) {
+            (Some(left), Some(right)) if left == right => Some(left),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            _ => None,
+        };
+
+        if let Some(index) = target_index {
+            diff_groups[index].push(diff_pair.clone());
+        } else {
+            unmatched_diffs.push(diff_pair.clone());
+        }
+    }
+
+    for (index, (root_path, mut group_files)) in dir_groups.into_iter().enumerate() {
+        let mut group_paths = Vec::with_capacity(group_files.len() + 1);
+        group_paths.push(PathWithPosition::from_path(root_path.clone()));
+        group_paths.append(&mut group_files);
+
+        let (workspace, items) = match open_paths_with_positions(
+            &group_paths,
+            &diff_groups[index],
+            app_state.clone(),
+            workspace::OpenOptions {
+                open_new_workspace: Some(true),
+                prefer_focused_window: false,
+                env: env.cloned(),
+                ..Default::default()
+            },
+            cx,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                responses
+                    .send(CliResponse::Stderr {
+                        message: format!("error opening {group_paths:?}: {error}"),
+                    })
+                    .log_err();
+                errored = true;
+                continue;
+            }
+        };
+
+        workspace
+            .update(cx, |workspace, window, cx| {
+                workspace.start_watch_folder(root_path, window, cx);
+            })
+            .log_err();
+
+        if wait {
             let (release_tx, release_rx) = oneshot::channel();
             item_release_futures.push(release_rx);
             subscriptions.push(workspace.update(cx, |_, _, cx| {
@@ -676,33 +879,108 @@ async fn open_local_workspace(
                 })
             }));
         }
+
+        for item in items {
+            match item {
+                Some(Ok(item)) => {
+                    if wait {
+                        let (release_tx, release_rx) = oneshot::channel();
+                        item_release_futures.push(release_rx);
+                        subscriptions.push(Ok(cx.update(|cx| {
+                            item.on_release(
+                                cx,
+                                Box::new(move |_| {
+                                    release_tx.send(()).ok();
+                                }),
+                            )
+                        })));
+                    }
+                }
+                Some(Err(err)) => {
+                    responses
+                        .send(CliResponse::Stderr {
+                            message: err.to_string(),
+                        })
+                        .log_err();
+                    errored = true;
+                }
+                None => {}
+            }
+        }
     }
 
-    for item in items {
-        match item {
-            Some(Ok(item)) => {
-                if wait {
-                    let (release_tx, release_rx) = oneshot::channel();
-                    item_release_futures.push(release_rx);
-                    subscriptions.push(Ok(cx.update(|cx| {
-                        item.on_release(
-                            cx,
-                            Box::new(move |_| {
-                                release_tx.send(()).ok();
-                            }),
-                        )
-                    })));
-                }
-            }
-            Some(Err(err)) => {
+    if !unmatched_files.is_empty() || !unmatched_diffs.is_empty() {
+        let (workspace, items) = match open_paths_with_positions(
+            &unmatched_files,
+            &unmatched_diffs,
+            app_state.clone(),
+            workspace::OpenOptions {
+                open_new_workspace: Some(true),
+                prefer_focused_window: false,
+                env: env.cloned(),
+                ..Default::default()
+            },
+            cx,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
                 responses
                     .send(CliResponse::Stderr {
-                        message: err.to_string(),
+                        message: format!("error opening {unmatched_files:?}: {error}"),
                     })
                     .log_err();
-                errored = true;
+                return true;
             }
-            None => {}
+        };
+
+        if wait {
+            let mut wait_for_window_close = unmatched_files.is_empty() && unmatched_diffs.is_empty();
+            for path_with_position in &unmatched_files {
+                if app_state.fs.is_dir(&path_with_position.path).await {
+                    wait_for_window_close = true;
+                    break;
+                }
+            }
+
+            if wait_for_window_close {
+                let (release_tx, release_rx) = oneshot::channel();
+                item_release_futures.push(release_rx);
+                subscriptions.push(workspace.update(cx, |_, _, cx| {
+                    cx.on_release(move |_, _| {
+                        let _ = release_tx.send(());
+                    })
+                }));
+            }
+        }
+
+        for item in items {
+            match item {
+                Some(Ok(item)) => {
+                    if wait {
+                        let (release_tx, release_rx) = oneshot::channel();
+                        item_release_futures.push(release_rx);
+                        subscriptions.push(Ok(cx.update(|cx| {
+                            item.on_release(
+                                cx,
+                                Box::new(move |_| {
+                                    release_tx.send(()).ok();
+                                }),
+                            )
+                        })));
+                    }
+                }
+                Some(Err(err)) => {
+                    responses
+                        .send(CliResponse::Stderr {
+                            message: err.to_string(),
+                        })
+                        .log_err();
+                    errored = true;
+                }
+                None => {}
+            }
         }
     }
 

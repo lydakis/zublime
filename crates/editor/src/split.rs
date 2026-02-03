@@ -45,8 +45,6 @@ pub struct SplittableEditor {
     secondary: Option<SecondaryEditor>,
     panes: PaneGroup,
     workspace: WeakEntity<Workspace>,
-    ignore_next_primary_scroll_event: bool,
-    ignore_next_secondary_scroll_event: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -109,34 +107,15 @@ impl SplittableEditor {
         });
         let panes = PaneGroup::new(pane);
         // TODO(split-diff) we might want to tag editor events with whether they came from primary/secondary
-        let subscriptions = vec![cx.subscribe_in(
+        let subscriptions = vec![cx.subscribe(
             &primary_editor,
-            window,
-            |this, editor, event: &EditorEvent, window, cx| match event {
+            |this, _, event: &EditorEvent, cx| match event {
                 EditorEvent::ExpandExcerptsRequested {
                     excerpt_ids,
                     lines,
                     direction,
                 } => {
                     this.expand_excerpts(excerpt_ids.iter().copied(), *lines, *direction, cx);
-                }
-                EditorEvent::ScrollPositionChanged { local, .. } if *local => {
-                    if this.ignore_next_primary_scroll_event {
-                        this.ignore_next_primary_scroll_event = false;
-                        return;
-                    }
-                    let Some(secondary) = &this.secondary else {
-                        return;
-                    };
-                    let scroll_position =
-                        editor.update(cx, |editor, cx| editor.scroll_position(cx));
-                    this.ignore_next_secondary_scroll_event = true;
-                    let was_scrolled = secondary.editor.update(cx, |secondary_editor, cx| {
-                        secondary_editor.set_scroll_position(scroll_position, window, cx)
-                    });
-                    if !was_scrolled.0 {
-                        this.ignore_next_secondary_scroll_event = false;
-                    }
                 }
                 EditorEvent::SelectionsChanged { .. } => {
                     if let Some(secondary) = &mut this.secondary {
@@ -167,8 +146,6 @@ impl SplittableEditor {
             secondary: None,
             panes,
             workspace: workspace.downgrade(),
-            ignore_next_primary_scroll_event: false,
-            ignore_next_secondary_scroll_event: false,
             _subscriptions: subscriptions,
         }
     }
@@ -224,10 +201,9 @@ impl SplittableEditor {
             pane
         });
 
-        let subscriptions = vec![cx.subscribe_in(
+        let subscriptions = vec![cx.subscribe(
             &secondary_editor,
-            window,
-            |this, editor, event: &EditorEvent, window, cx| match event {
+            |this, _, event: &EditorEvent, cx| match event {
                 EditorEvent::ExpandExcerptsRequested {
                     excerpt_ids,
                     lines,
@@ -246,21 +222,6 @@ impl SplittableEditor {
                         secondary.has_latest_selection = true;
                     }
                     cx.emit(event.clone());
-                }
-                EditorEvent::ScrollPositionChanged { local, .. } if *local => {
-                    if this.ignore_next_secondary_scroll_event {
-                        this.ignore_next_secondary_scroll_event = false;
-                        return;
-                    }
-                    let scroll_position =
-                        editor.update(cx, |editor, cx| editor.scroll_position(cx));
-                    this.ignore_next_primary_scroll_event = true;
-                    let was_scrolled = this.primary_editor.update(cx, |primary_editor, cx| {
-                        primary_editor.set_scroll_position(scroll_position, window, cx)
-                    });
-                    if !was_scrolled.0 {
-                        this.ignore_next_primary_scroll_event = false;
-                    }
                 }
                 _ => cx.emit(event.clone()),
             },
@@ -329,14 +290,6 @@ impl SplittableEditor {
                 secondary_editor.added_to_workspace(workspace, window, cx);
             });
         }
-    }
-
-    pub fn enable_split_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.split(&SplitDiff, window, cx);
-    }
-
-    pub fn disable_split_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.unsplit(&UnsplitDiff, window, cx);
     }
 
     pub fn set_excerpts_for_path(

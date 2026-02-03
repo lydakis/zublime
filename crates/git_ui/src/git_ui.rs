@@ -1,9 +1,10 @@
 use std::any::Any;
 
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use command_palette_hooks::CommandPaletteFilter;
 use commit_modal::CommitModal;
 use editor::{Editor, actions::DiffClipboardWithSelectionData};
+use language::{Buffer, Capability};
 use project::ProjectPath;
 use ui::{
     Headline, HeadlineSize, Icon, IconName, IconSize, IntoElement, ParentElement, Render, Styled,
@@ -29,13 +30,8 @@ use ui::prelude::*;
 use workspace::{ModalView, Workspace, notifications::DetachAndPromptErr};
 use zed_actions;
 
-use crate::{
-    active_buffer_git_diff::{DiffBase, toggle_active_buffer_git_diff},
-    git_panel::GitPanel,
-    text_diff_view::TextDiffView,
-};
+use crate::{git_panel::GitPanel, text_diff_view::TextDiffView};
 
-pub mod active_buffer_git_diff;
 mod askpass_modal;
 pub mod branch_picker;
 mod commit_modal;
@@ -57,19 +53,137 @@ pub mod stash_picker;
 pub mod text_diff_view;
 pub mod worktree_picker;
 
-pub use active_buffer_git_diff::ActiveBufferGitDiff;
-
 actions!(
     git,
     [
         /// Resets the git onboarding state to show the tutorial again.
         ResetOnboarding,
-        /// Toggles a side-by-side diff for the active file (HEAD ↔ working tree).
+        /// Toggles a diff for the active file (HEAD ↔ working tree).
         ToggleActiveFileDiff,
-        /// Toggles a side-by-side diff for the active file (staged ↔ working tree).
+        /// Toggles a diff for the active file (staged ↔ working tree).
         ToggleActiveFileDiffStaged
     ]
 );
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DiffBase {
+    Head,
+    Staged,
+}
+
+fn open_active_file_diff(
+    workspace: &mut Workspace,
+    base: DiffBase,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let pane = workspace.active_pane().clone();
+    let (active_item, active_index) = {
+        let pane = pane.read(cx);
+        (pane.active_item(), pane.active_item_index())
+    };
+    let Some(active_item) = active_item else {
+        return;
+    };
+    let active_item_id = active_item.item_id();
+
+    if let Some(diff_view) = active_item.downcast::<file_diff_view::FileDiffView>() {
+        let buffer = diff_view.read(cx).new_buffer();
+        let project = workspace.project().clone();
+        let editor = pane.update(cx, |pane, cx| {
+            cx.new(|cx| Editor::for_project_item(project.clone(), Some(pane), buffer, window, cx))
+        });
+        pane.update(cx, |pane, cx| {
+            pane.remove_item(active_item_id, false, false, window, cx);
+            pane.add_item(
+                Box::new(editor.clone()),
+                true,
+                true,
+                Some(active_index),
+                window,
+                cx,
+            );
+        });
+        return;
+    }
+
+    let Some(editor) = active_item.downcast::<Editor>() else {
+        return;
+    };
+    let Some((_, buffer, _)) = editor.read(cx).active_excerpt(cx) else {
+        return;
+    };
+    let buffer_id = buffer.read(cx).remote_id();
+    let in_repo = workspace
+        .project()
+        .read(cx)
+        .git_store()
+        .read(cx)
+        .repository_and_path_for_buffer_id(buffer_id, cx)
+        .is_some();
+    if !in_repo {
+        return;
+    }
+
+    let project = workspace.project().clone();
+    let diff_task = project.update(cx, |project, cx| match base {
+        DiffBase::Head => project.open_uncommitted_diff(buffer.clone(), cx),
+        DiffBase::Staged => project.open_unstaged_diff(buffer.clone(), cx),
+    });
+
+    let workspace = cx.entity().downgrade();
+    let pane = pane.downgrade();
+    window
+        .spawn(cx, async move |cx| -> Result<()> {
+            let diff = diff_task.await?;
+            let base_text = diff
+                .read_with(cx, |diff, cx| diff.base_text_string(cx))
+                .unwrap_or_default();
+            let language = buffer.read_with(cx, |buffer, _| buffer.language().cloned());
+            let old_buffer = cx.new(|cx| {
+                let mut buffer = Buffer::local(base_text, cx);
+                if let Some(language) = language {
+                    buffer = buffer.with_language(language, cx);
+                }
+                buffer.set_capability(Capability::ReadOnly, cx);
+                buffer
+            });
+
+            let Some(workspace) = workspace.upgrade() else {
+                return Ok(());
+            };
+            let Some(pane) = pane.upgrade() else {
+                return Ok(());
+            };
+
+            workspace.update_in(cx, |_workspace, window, cx| {
+                let diff_view = cx.new(|cx| {
+                    file_diff_view::FileDiffView::new(
+                        old_buffer,
+                        buffer.clone(),
+                        diff.clone(),
+                        project.clone(),
+                        window,
+                        cx,
+                    )
+                });
+                pane.update(cx, |pane, cx| {
+                    pane.add_item(
+                        Box::new(diff_view.clone()),
+                        true,
+                        true,
+                        Some(active_index),
+                        window,
+                        cx,
+                    );
+                    pane.remove_item(active_item_id, false, false, window, cx);
+                });
+            })?;
+
+            Ok(())
+        })
+        .detach();
+}
 
 pub fn init(cx: &mut App) {
     editor::set_blame_renderer(blame_ui::GitBlameRenderer, cx);
@@ -90,10 +204,10 @@ pub fn init(cx: &mut App) {
         worktree_picker::register(workspace);
         stash_picker::register(workspace);
         workspace.register_action(|workspace, _: &ToggleActiveFileDiff, window, cx| {
-            toggle_active_buffer_git_diff(workspace, DiffBase::Head, window, cx);
+            open_active_file_diff(workspace, DiffBase::Head, window, cx);
         });
         workspace.register_action(|workspace, _: &ToggleActiveFileDiffStaged, window, cx| {
-            toggle_active_buffer_git_diff(workspace, DiffBase::Staged, window, cx);
+            open_active_file_diff(workspace, DiffBase::Staged, window, cx);
         });
 
         let project = workspace.project().read(cx);

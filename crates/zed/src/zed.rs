@@ -32,7 +32,7 @@ use futures::future::Either;
 use futures::{StreamExt, channel::mpsc, select_biased};
 use git_ui::commit_view::CommitViewToolbar;
 use git_ui::git_panel::GitPanel;
-use git_ui::{ActiveBufferGitDiff, project_diff::ProjectDiffToolbar};
+use git_ui::project_diff::ProjectDiffToolbar;
 use gpui::{
     Action, App, AppContext as _, AsyncWindowContext, Context, DismissEvent, Element, Entity,
     Focusable, KeyBinding, ParentElement, PathPromptOptions, PromptLevel, ReadGlobal, SharedString,
@@ -190,9 +190,6 @@ pub fn init(cx: &mut App) {
             settings.tab_bar.get_or_insert_default().layout = Some(next_layout);
         });
     });
-    if MINIMAL_UI {
-        cx.update_flags(true, vec!["split-diff".to_string()]);
-    }
     let flag = cx.wait_for_flag::<PanicFeatureFlag>();
     cx.spawn(async |cx| {
         if cx.update(|cx| ReleaseChannel::global(cx) == ReleaseChannel::Dev) || flag.await {
@@ -450,12 +447,10 @@ pub fn initialize_workspace(
             cx.new(|_| go_to_line::cursor_position::CursorPosition::new(workspace));
         let active_buffer_language =
             cx.new(|_| language_selector::ActiveBufferLanguage::new(workspace));
-        let active_buffer_git_diff = cx.new(|_| ActiveBufferGitDiff::new(workspace));
         let active_buffer_tab_size =
             cx.new(|_| language_selector::ActiveBufferTabSize::new(workspace));
         workspace.status_bar().update(cx, |status_bar, cx| {
             status_bar.add_right_item(active_buffer_language, window, cx);
-            status_bar.add_right_item(active_buffer_git_diff, window, cx);
             status_bar.add_right_item(active_buffer_tab_size, window, cx);
             status_bar.add_right_item(cursor_position, window, cx);
         });

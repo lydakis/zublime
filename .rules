@@ -28,6 +28,14 @@
 * Commit messages are short, sentence-case summaries; area prefixes like `vim:` or `language_models:` are common and PR numbers appear as `(#12345)`.
 * PRs should explain what and why, include tests, attach screenshots for UI changes, and keep the change focused. Feature additions should be confirmed via issue or discussion first (see `CONTRIBUTING.md`).
 
+## Release Workflow (macOS DMG)
+1. Ensure you are on `main` and version bump is committed (`crates/zed/Cargo.toml` and `Cargo.lock`).
+2. Build the DMG with a proper terminal: `TERM=xterm-256color script/bundle-mac`.
+3. Compute the checksum: `shasum -a 256 target/aarch64-apple-darwin/release/Zublime-aarch64.dmg`.
+4. Tag and push the release: `git tag -a vX.Y.Z -m "vX.Y.Z"`, `git push origin main`, `git push origin vX.Y.Z`.
+5. Create the GitHub release and upload the DMG: `gh release create vX.Y.Z target/aarch64-apple-darwin/release/Zublime-aarch64.dmg --title "vX.Y.Z" --notes "Zublime X.Y.Z"`.
+6. Update Homebrew cask in `../homebrew-zublime/Casks/zublime.rb` with the new version and sha256, then commit and push in that repo.
+
 ## Agent-Specific Notes
 * If using automation, follow Rust guidance in `CLAUDE.md`/`GEMINI.md` and documentation rules in `docs/AGENTS.md` when editing docs.
 

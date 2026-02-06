@@ -576,6 +576,7 @@
       "ctrl-k ctrl-shift-s": "workspace::SaveWithoutFormat",
       "ctrl-shift-s": "workspace::SaveAs",
       "ctrl-n": "workspace::NewFile",
+      "ctrl-alt-n": "workspace::NewCenterTerminal",
       "ctrl-shift-n": "workspace::NewWindow",
       "ctrl-`": "terminal_panel::Toggle",
       "f10": ["app_menu::OpenApplicationMenu", "Zed"],

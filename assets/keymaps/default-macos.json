@@ -643,6 +643,7 @@
       "cmd-ctrl-b": "branches::OpenRecent",
       "cmd-alt-p": "workspace::SwitchProject",
       "ctrl-~": "workspace::NewTerminal",
+      "cmd-alt-n": "workspace::NewCenterTerminal",
       "cmd-s": "workspace::Save",
       "cmd-k s": "workspace::SaveWithoutFormat",
       "alt-shift-enter": "toast::RunAction",

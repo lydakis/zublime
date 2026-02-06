@@ -1,7 +1,7 @@
 use crate::{
-    CloseWindow, NewFile, NewTerminal, OpenFiles, OpenInTerminal, OpenOptions, OpenTerminal,
-    OpenVisible, SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom, Workspace,
-    WorkspaceItemBuilder, ZoomIn, ZoomOut,
+    CloseWindow, NewCenterTerminal, NewFile, NewTerminal, OpenFiles, OpenInTerminal, OpenOptions,
+    OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom,
+    WatchFolder, Workspace, WorkspaceItemBuilder, ZoomIn, ZoomOut,
     invalid_item_view::InvalidItemView,
     item::{
         ActivateOnClose, ClosePosition, Item, ItemBufferKind, ItemHandle, ItemSettings,
@@ -21,9 +21,9 @@ use futures::{StreamExt, stream::FuturesUnordered};
 use gpui::{
     Action, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Corner, Div,
     DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
-    Focusable, KeyContext, MouseButton, NavigationDirection, Pixels, Point, PromptLevel, Render,
-    ScrollHandle, Subscription, Task, WeakEntity, WeakFocusHandle, Window, actions, anchored,
-    deferred, prelude::*,
+    Focusable, KeyContext, Modifiers, MouseButton, MouseDownEvent, NavigationDirection, Pixels,
+    Point, PromptLevel, Render, ScrollHandle, Subscription, Task, WeakEntity, WeakFocusHandle,
+    Window, actions, anchored, deferred, prelude::*,
 };
 use itertools::Itertools;
 use language::{Capability, DiagnosticSeverity};
@@ -62,6 +62,51 @@ pub struct SelectedEntry {
 
 const MINIMAL_UI: bool = true;
 const VERTICAL_TAB_BAR_WIDTH: Pixels = px(148.0);
+
+#[derive(Clone, Copy)]
+enum TabBarOpenFileAction {
+    OpenFiles,
+    NewTerminalTab,
+    WatchFolder,
+}
+
+impl TabBarOpenFileAction {
+    fn from_modifiers(modifiers: Modifiers) -> Self {
+        if modifiers.alt && modifiers.shift {
+            Self::WatchFolder
+        } else if modifiers.alt {
+            Self::NewTerminalTab
+        } else {
+            Self::OpenFiles
+        }
+    }
+
+    fn label(self, _cx: &mut App) -> String {
+        match self {
+            Self::OpenFiles => "Open".to_string(),
+            Self::NewTerminalTab => "New Terminal".to_string(),
+            Self::WatchFolder => "Watch Folder".to_string(),
+        }
+    }
+
+    fn tooltip(self, _cx: &mut App) -> String {
+        match self {
+            Self::OpenFiles => "Open File".to_string(),
+            Self::NewTerminalTab => "New Terminal Tab".to_string(),
+            Self::WatchFolder => "Watch Folder".to_string(),
+        }
+    }
+
+    fn dispatch(self, window: &mut Window, cx: &mut App) {
+        match self {
+            Self::OpenFiles => window.dispatch_action(OpenFiles.boxed_clone(), cx),
+            Self::NewTerminalTab => {
+                window.dispatch_action(NewCenterTerminal::default().boxed_clone(), cx)
+            }
+            Self::WatchFolder => window.dispatch_action(WatchFolder.boxed_clone(), cx),
+        }
+    }
+}
 
 /// A group of selected entries from project panel.
 #[derive(Debug)]
@@ -3444,9 +3489,52 @@ impl Pane {
                 .flatten()
                 .unwrap_or(false);
 
-        let open_file_button = self.render_open_file_button_horizontal(window, cx);
+        let tab_bar_settings = TabBarSettings::get_global(cx);
+        let use_separate_rows = tab_bar_settings.show_pinned_tabs_in_separate_row;
 
-        TabBar::new("tab_bar")
+        if use_separate_rows && !pinned_tabs.is_empty() && !unpinned_tabs.is_empty() {
+            self.render_two_row_tab_bar(
+                pinned_tabs,
+                unpinned_tabs,
+                tab_count,
+                navigate_backward,
+                navigate_forward,
+                open_aside_left,
+                open_aside_right,
+                render_aside_toggle_left,
+                render_aside_toggle_right,
+                window,
+                cx,
+            )
+        } else {
+            self.render_single_row_tab_bar(
+                pinned_tabs,
+                unpinned_tabs,
+                tab_count,
+                navigate_backward,
+                navigate_forward,
+                open_aside_left,
+                open_aside_right,
+                render_aside_toggle_left,
+                render_aside_toggle_right,
+                window,
+                cx,
+            )
+        }
+    }
+
+    fn configure_tab_bar_start(
+        &mut self,
+        tab_bar: TabBar,
+        navigate_backward: IconButton,
+        navigate_forward: IconButton,
+        open_aside_left: Option<AnyElement>,
+        render_aside_toggle_left: bool,
+        window: &mut Window,
+        cx: &mut Context<Pane>,
+    ) -> TabBar {
+        let open_file_button = self.render_open_file_button_horizontal(window, cx);
+        tab_bar
             .start_child(open_file_button)
             .map(|tab_bar| {
                 if let Some(open_aside_left) = open_aside_left
@@ -3591,6 +3679,72 @@ impl Pane {
             .into_any_element()
     }
 
+    fn render_unpinned_tabs_container(
+        &mut self,
+        unpinned_tabs: Vec<AnyElement>,
+        tab_count: usize,
+        cx: &mut Context<Pane>,
+    ) -> impl IntoElement {
+        h_flex()
+            .id("unpinned tabs")
+            .overflow_x_scroll()
+            .w_full()
+            .track_scroll(&self.tab_bar_scroll_handle)
+            .on_scroll_wheel(cx.listener(|this, _, _, _| {
+                this.suppress_scroll = true;
+            }))
+            .children(unpinned_tabs)
+            .child(self.render_tab_bar_drop_target(tab_count, cx))
+    }
+
+    fn render_tab_bar_drop_target(
+        &self,
+        tab_count: usize,
+        cx: &mut Context<Pane>,
+    ) -> impl IntoElement {
+        div()
+            .id("tab_bar_drop_target")
+            .min_w_6()
+            // HACK: This empty child is currently necessary to force the drop target to appear
+            // despite us setting a min width above.
+            .child("")
+            // HACK: h_full doesn't occupy the complete height, using fixed height instead
+            .h(Tab::container_height(cx))
+            .flex_grow()
+            .drag_over::<DraggedTab>(|bar, _, _, cx| {
+                bar.bg(cx.theme().colors().drop_target_background)
+            })
+            .drag_over::<DraggedSelection>(|bar, _, _, cx| {
+                bar.bg(cx.theme().colors().drop_target_background)
+            })
+            .on_drop(
+                cx.listener(move |this, dragged_tab: &DraggedTab, window, cx| {
+                    this.drag_split_direction = None;
+                    this.handle_tab_drop(dragged_tab, this.items.len(), window, cx)
+                }),
+            )
+            .on_drop(
+                cx.listener(move |this, selection: &DraggedSelection, window, cx| {
+                    this.drag_split_direction = None;
+                    this.handle_project_entry_drop(
+                        &selection.active_selection.entry_id,
+                        Some(tab_count),
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .on_drop(cx.listener(move |this, paths, window, cx| {
+                this.drag_split_direction = None;
+                this.handle_external_paths_drop(paths, window, cx)
+            }))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if event.click_count() == 2 {
+                    window.dispatch_action(this.double_click_dispatch_action.boxed_clone(), cx);
+                }
+            }))
+    }
+
     fn render_vertical_tab_bar(
         &mut self,
         window: &mut Window,
@@ -3656,27 +3810,37 @@ impl Pane {
 
     fn render_open_file_button_horizontal(
         &self,
-        _window: &mut Window,
-        _cx: &mut Context<Pane>,
+        window: &mut Window,
+        cx: &mut Context<Pane>,
     ) -> AnyElement {
-        IconButton::new("tab_bar_open_file", IconName::Plus)
-            .icon_size(IconSize::Small)
-            .shape(IconButtonShape::Square)
-            .tooltip(Tooltip::text("Open File"))
-            .on_click(|_, window, cx| {
-                window.dispatch_action(OpenFiles.boxed_clone(), cx);
-            })
+        let open_action = TabBarOpenFileAction::from_modifiers(window.modifiers());
+
+        div()
+            .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
+            .child(
+                IconButton::new("tab_bar_open_file", IconName::Plus)
+                    .icon_size(IconSize::Small)
+                    .shape(IconButtonShape::Square)
+                    .tooltip(Tooltip::text(open_action.tooltip(cx)))
+                    .on_click(|event: &ClickEvent, window, cx| {
+                        TabBarOpenFileAction::from_modifiers(event.modifiers())
+                            .dispatch(window, cx);
+                    }),
+            )
             .into_any_element()
     }
 
     fn render_open_file_button_vertical(
         &self,
-        _window: &mut Window,
-        _cx: &mut Context<Pane>,
+        window: &mut Window,
+        cx: &mut Context<Pane>,
     ) -> AnyElement {
+        let open_action = TabBarOpenFileAction::from_modifiers(window.modifiers());
+
         div()
             .px_2()
             .py_0p5()
+            .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .child(
                 ButtonLike::new("vertical_tab_open_file")
                     .full_width()
@@ -3690,10 +3854,11 @@ impl Pane {
                                     .size(IconSize::Small)
                                     .color(Color::Muted),
                             )
-                            .child(Label::new("Open").color(Color::Muted)),
+                            .child(Label::new(open_action.label(cx)).color(Color::Muted)),
                     )
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(OpenFiles.boxed_clone(), cx);
+                    .on_click(|event: &ClickEvent, window, cx| {
+                        TabBarOpenFileAction::from_modifiers(event.modifiers())
+                            .dispatch(window, cx);
                     }),
             )
             .into_any_element()

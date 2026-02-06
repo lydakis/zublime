@@ -846,7 +846,6 @@ fn prompt_and_open_paths(
         &WorkspaceSettings::get_global(cx),
         recursive_override,
     );
-    let fs = app_state.fs.clone();
     let prompt_window = cx
         .active_window()
         .and_then(|window| window.downcast::<Workspace>());
@@ -864,7 +863,7 @@ fn prompt_and_open_paths(
 
                 let selection = resolve_open_dialog_selection(
                     paths,
-                    fs,
+                    app_state.fs.clone(),
                     settings,
                     prompt_window,
                     allow_workspace,
@@ -907,9 +906,9 @@ fn prompt_and_open_paths(
                     }
                 });
             }
-        },
-    )
-    .detach();
+            },
+        )
+        .detach();
 }
 
 pub fn init(app_state: Arc<AppState>, cx: &mut App) {

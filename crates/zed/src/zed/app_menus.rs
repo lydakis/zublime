@@ -131,6 +131,7 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
             items: vec![
                 MenuItem::action("New", workspace::NewFile),
                 MenuItem::action("New Window", workspace::NewWindow),
+                MenuItem::action("New Terminal", workspace::NewCenterTerminal::default()),
                 MenuItem::separator(),
                 MenuItem::action("Open File...", workspace::OpenFiles),
                 MenuItem::action("Browse Files...", ToggleDirectoryBrowser),

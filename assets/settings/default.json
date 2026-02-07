@@ -1144,6 +1144,8 @@
     "show_nav_history_buttons": false,
     // Whether or not to show the tab bar buttons.
     "show_tab_bar_buttons": false,
+    // Whether or not to show pinned tabs in a separate top row.
+    "show_pinned_tabs_in_separate_row": false,
   },
   // Settings related to the editor's tabs
   "tabs": {

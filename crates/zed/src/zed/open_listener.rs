@@ -374,8 +374,17 @@ pub async fn open_paths_with_positions(
         .await?;
 
     if diff_all && !diff_paths.is_empty() {
+        let canonical_diff_paths = diff_paths
+            .iter()
+            .map(|diff_pair| {
+                [
+                    canonicalize_diff_path_for_open(&diff_pair[0]),
+                    canonicalize_diff_path_for_open(&diff_pair[1]),
+                ]
+            })
+            .collect::<Vec<_>>();
         if let Ok(diff_view) = workspace.update(cx, |workspace, window, cx| {
-            MultiDiffView::open(diff_paths.to_vec(), workspace, window, cx)
+            MultiDiffView::open(canonical_diff_paths, workspace, window, cx)
         }) {
             if let Some(diff_view) = diff_view.await.log_err() {
                 items.push(Some(Ok(Box::new(diff_view))));
@@ -418,6 +427,17 @@ pub async fn open_paths_with_positions(
     }
 
     Ok((workspace, items))
+}
+
+fn canonicalize_diff_path_for_open(path_str: &str) -> String {
+    let path = Path::new(path_str);
+    match path.canonicalize() {
+        Ok(canonical) => canonical.to_string_lossy().into_owned(),
+        Err(_) if path.is_absolute() => path.to_string_lossy().into_owned(),
+        Err(_) => std::env::current_dir()
+            .map(|cwd| cwd.join(path).to_string_lossy().into_owned())
+            .unwrap_or_else(|_| path.to_string_lossy().into_owned()),
+    }
 }
 
 pub async fn handle_cli_connection(
@@ -612,8 +632,8 @@ async fn open_local_workspace(
     app_state: &Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> bool {
-    let paths_with_position = derive_paths_with_position(app_state.fs.as_ref(), workspace_paths)
-        .await;
+    let paths_with_position =
+        derive_paths_with_position(app_state.fs.as_ref(), workspace_paths).await;
 
     let mut dir_roots = Vec::new();
     let mut file_entries = Vec::new();
@@ -665,6 +685,7 @@ async fn open_local_workspace(
         let (workspace, items) = match open_paths_with_positions(
             &file_paths_with_position,
             &diff_paths,
+            diff_all,
             app_state.clone(),
             workspace::OpenOptions {
                 open_new_workspace,
@@ -841,6 +862,7 @@ async fn open_local_workspace(
         let (workspace, items) = match open_paths_with_positions(
             &group_paths,
             &diff_groups[index],
+            diff_all,
             app_state.clone(),
             workspace::OpenOptions {
                 open_new_workspace: Some(true),
@@ -866,7 +888,20 @@ async fn open_local_workspace(
 
         workspace
             .update(cx, |workspace, window, cx| {
-                workspace.start_watch_folder(root_path, window, cx);
+                let pane = workspace.active_pane().clone();
+                let group_id = pane.update(cx, |pane, cx| {
+                    let group_id = pane.ensure_manual_group_for_watch(cx.entity_id()).id;
+                    pane.upsert_group_watch_config(group_id, root_path.clone(), false);
+                    cx.notify();
+                    group_id
+                });
+                workspace.start_watch_folder_for_group(
+                    group_id,
+                    root_path.clone(),
+                    false,
+                    window,
+                    cx,
+                );
             })
             .log_err();
 
@@ -913,6 +948,7 @@ async fn open_local_workspace(
         let (workspace, items) = match open_paths_with_positions(
             &unmatched_files,
             &unmatched_diffs,
+            diff_all,
             app_state.clone(),
             workspace::OpenOptions {
                 open_new_workspace: Some(true),
@@ -936,7 +972,8 @@ async fn open_local_workspace(
         };
 
         if wait {
-            let mut wait_for_window_close = unmatched_files.is_empty() && unmatched_diffs.is_empty();
+            let mut wait_for_window_close =
+                unmatched_files.is_empty() && unmatched_diffs.is_empty();
             for path_with_position in &unmatched_files {
                 if app_state.fs.is_dir(&path_with_position.path).await {
                     wait_for_window_close = true;

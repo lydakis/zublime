@@ -129,7 +129,7 @@ use util::{
     serde::default_true,
 };
 use uuid::Uuid;
-use watch_folder::{WatchFolderState, WatchStatus};
+use watch_folder::{GroupWatchState, WatchStatus};
 pub use workspace_settings::{
     AutosaveSetting, BottomDockLayout, RestoreOnStartupBehavior, StatusBarSettings, TabBarLayout,
     TabBarSettings, WorkspaceSettings,
@@ -906,9 +906,9 @@ fn prompt_and_open_paths(
                     }
                 });
             }
-            },
-        )
-        .detach();
+        },
+    )
+    .detach();
 }
 
 pub fn init(app_state: Arc<AppState>, cx: &mut App) {
@@ -1551,8 +1551,9 @@ pub struct Workspace {
     last_open_dock_positions: Vec<DockPosition>,
     removing: bool,
     directory_browser_state: DirectoryBrowserState,
-    watch_folder: Option<WatchFolderState>,
-    watch_request_id: u64,
+    watch_groups: HashMap<u64, GroupWatchState>,
+    watch_request_ids: HashMap<u64, u64>,
+    next_watch_request_id: u64,
     utility_panes: UtilityPaneState,
 }
 
@@ -1987,8 +1988,9 @@ impl Workspace {
             last_open_dock_positions: Vec::new(),
             removing: false,
             directory_browser_state: DirectoryBrowserState::default(),
-            watch_folder: None,
-            watch_request_id: 0,
+            watch_groups: HashMap::default(),
+            watch_request_ids: HashMap::default(),
+            next_watch_request_id: 0,
             utility_panes: UtilityPaneState::default(),
         }
     }
@@ -2562,6 +2564,8 @@ impl Workspace {
                                 true,
                                 entry.is_preview,
                                 true,
+                                None,
+                                None,
                                 None,
                                 window, cx,
                                 build_item,
@@ -4189,6 +4193,31 @@ impl Workspace {
         window: &mut Window,
         cx: &mut App,
     ) -> Task<anyhow::Result<Box<dyn ItemHandle>>> {
+        self.open_path_preview_in_scope(
+            path,
+            pane,
+            focus_item,
+            allow_preview,
+            activate,
+            None,
+            None,
+            window,
+            cx,
+        )
+    }
+
+    pub fn open_path_preview_in_scope(
+        &mut self,
+        path: impl Into<ProjectPath>,
+        pane: Option<WeakEntity<Pane>>,
+        focus_item: bool,
+        allow_preview: bool,
+        activate: bool,
+        instance_scope: Option<TabInstanceScope>,
+        watch_origin_group_id: Option<u64>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<anyhow::Result<Box<dyn ItemHandle>>> {
         let pane = pane.unwrap_or_else(|| {
             self.last_active_center_pane.clone().unwrap_or_else(|| {
                 self.panes
@@ -4211,6 +4240,8 @@ impl Workspace {
                     allow_preview,
                     activate,
                     None,
+                    instance_scope,
+                    watch_origin_group_id,
                     window,
                     cx,
                     build_item,
@@ -4268,6 +4299,8 @@ impl Workspace {
                         true,
                         allow_preview,
                         true,
+                        None,
+                        None,
                         None,
                         window,
                         cx,
@@ -6115,7 +6148,7 @@ impl Workspace {
             window: &mut Window,
             cx: &mut App,
         ) -> SerializedPane {
-            let (items, active, pinned_count) = {
+            let (items, active, pinned_count, tab_ui_state) = {
                 let pane = pane_handle.read(cx);
                 let active_item_id = pane.active_item().map(|item| item.item_id());
                 (
@@ -6133,10 +6166,11 @@ impl Workspace {
                         .collect::<Vec<_>>(),
                     pane.has_focus(window, cx),
                     pane.pinned_count(),
+                    serde_json::to_string(pane.tab_ui_state()).ok(),
                 )
             };
 
-            SerializedPane::new(items, active, pinned_count)
+            SerializedPane::new_with_tab_ui_state(items, active, pinned_count, tab_ui_state)
         }
 
         fn build_serialized_pane_group(
@@ -6377,6 +6411,9 @@ impl Workspace {
 
             let mut center_group = None;
             let mut center_items = None;
+            let serialized_watch_group_configs = serialized_workspace
+                .center_group
+                .collect_group_watch_configs();
 
             // Traverse the splits tree and add to things
             if let Some((group, active_pane, items)) = serialized_workspace
@@ -6486,7 +6523,13 @@ impl Workspace {
             futures::future::join_all(clean_up_tasks).await;
 
             workspace
-                .update_in(cx, |workspace, window, cx| {
+                .update_in(cx, move |workspace, window, cx| {
+                    workspace.reattach_watch_groups_from_panes(
+                        serialized_watch_group_configs,
+                        window,
+                        cx,
+                    );
+
                     // Serialize ourself to make sure our timestamps and any pane / item changes are replicated
                     workspace.serialize_workspace_internal(window, cx).detach();
 
@@ -6833,6 +6876,17 @@ impl Workspace {
                     cx.propagate();
                 },
             ))
+            .on_action(
+                cx.listener(|workspace: &mut Workspace, _: &pane::NewTabGroup, _, cx| {
+                    let pane = workspace.active_pane().clone();
+                    pane.update(cx, |pane, cx| {
+                        let pane_entity_id = cx.entity_id();
+                        let new_group = pane.create_manual_group(None, pane_entity_id);
+                        pane.set_active_horizontal_filter(Some(new_group.id));
+                        cx.notify();
+                    });
+                }),
+            )
             .on_action(cx.listener(
                 |workspace: &mut Workspace, action: &pane::CloseActiveItem, window, cx| {
                     if let Some(active_dock) = workspace.active_dock(window, cx) {
@@ -9437,6 +9491,45 @@ fn join_pane_into_active(
     }
 }
 
+fn migrate_group_to_destination(
+    source_pane: &Entity<Pane>,
+    destination_pane: &Entity<Pane>,
+    group_id: Option<u64>,
+    cx: &mut App,
+) -> Option<u64> {
+    let Some(group_id) = group_id else {
+        return None;
+    };
+    if source_pane == destination_pane {
+        return Some(group_id);
+    }
+
+    let Some(manual_group) = source_pane.read(cx).manual_group_by_id(group_id) else {
+        return Some(group_id);
+    };
+    let watch_config = source_pane
+        .read(cx)
+        .watch_config_for_group(group_id)
+        .cloned();
+    let is_collapsed = source_pane.read(cx).is_group_collapsed(group_id);
+
+    destination_pane.update(cx, |destination_pane, cx| {
+        let mut did_change = destination_pane.ensure_manual_group(manual_group.clone());
+        if let Some(watch_config) = watch_config.clone() {
+            did_change |= destination_pane.ensure_group_watch_config(watch_config);
+        }
+        if destination_pane.is_group_collapsed(group_id) != is_collapsed {
+            destination_pane.set_group_collapsed(group_id, is_collapsed);
+            did_change = true;
+        }
+        if did_change {
+            cx.notify();
+        }
+    });
+
+    Some(group_id)
+}
+
 fn move_all_items(
     from_pane: &Entity<Pane>,
     to_pane: &Entity<Pane>,
@@ -9452,6 +9545,14 @@ fn move_all_items(
         .map(|(ix, item)| (ix, item.clone()))
         .collect::<Vec<_>>()
     {
+        let item_id = item_handle.item_id();
+        let item_metadata = from_pane.read(cx).item_metadata_for(item_id).cloned();
+        let item_group = migrate_group_to_destination(
+            from_pane,
+            to_pane,
+            from_pane.read(cx).group_for_item(item_id),
+            cx,
+        );
         let ix = item_ix - moved_items;
         if destination_is_different {
             // Close item from previous pane
@@ -9463,7 +9564,19 @@ fn move_all_items(
 
         // This automatically removes duplicate items in the pane
         to_pane.update(cx, |destination, cx| {
-            destination.add_item(item_handle, true, true, None, window, cx);
+            destination.add_item_inner(
+                item_handle,
+                true,
+                true,
+                true,
+                None,
+                item_metadata.clone(),
+                window,
+                cx,
+            );
+            if let Some(item_group) = item_group {
+                destination.assign_item_to_group(item_id, Some(item_group));
+            }
             window.focus(&destination.focus_handle(cx), cx)
         });
     }
@@ -9488,6 +9601,13 @@ pub fn move_item(
         // Tab was closed during drag
         return;
     };
+    let item_metadata = source.read(cx).item_metadata_for(item_id_to_move).cloned();
+    let item_group = migrate_group_to_destination(
+        source,
+        destination,
+        source.read(cx).group_for_item(item_id_to_move),
+        cx,
+    );
 
     if source != destination {
         // Close item from previous pane
@@ -9504,9 +9624,13 @@ pub fn move_item(
             activate,
             activate,
             Some(destination_index),
+            item_metadata.clone(),
             window,
             cx,
         );
+        if let Some(item_group) = item_group {
+            destination.assign_item_to_group(item_id_to_move, Some(item_group));
+        }
         if activate {
             window.focus(&destination.focus_handle(cx), cx)
         }
@@ -9527,18 +9651,30 @@ pub fn move_active_item(
     let Some(active_item) = source.read(cx).active_item() else {
         return;
     };
+    let item_id = active_item.item_id();
+    let item_metadata = source.read(cx).item_metadata_for(item_id).cloned();
+    let item_group = migrate_group_to_destination(
+        source,
+        destination,
+        source.read(cx).group_for_item(item_id),
+        cx,
+    );
     source.update(cx, |source_pane, cx| {
-        let item_id = active_item.item_id();
         source_pane.remove_item(item_id, false, close_if_empty, window, cx);
         destination.update(cx, |target_pane, cx| {
-            target_pane.add_item(
+            target_pane.add_item_inner(
                 active_item,
                 focus_destination,
                 focus_destination,
+                true,
                 Some(target_pane.items_len()),
+                item_metadata.clone(),
                 window,
                 cx,
             );
+            if let Some(item_group) = item_group {
+                target_pane.assign_item_to_group(item_id, Some(item_group));
+            }
         });
     });
 }

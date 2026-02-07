@@ -812,8 +812,11 @@ mod linux {
 
                 // libexec is the standard, lib/zublime is for Arch (and other non-libexec distros),
                 // ./zublime is for the target directory in development builds.
-                let possible_locations =
-                    ["../libexec/zublime-editor", "../lib/zublime/zublime-editor", "./zublime"];
+                let possible_locations = [
+                    "../libexec/zublime-editor",
+                    "../lib/zublime/zublime-editor",
+                    "./zublime",
+                ];
                 possible_locations
                     .iter()
                     .find_map(|p| dir.join(p).canonicalize().ok().filter(|path| path != &cli))
@@ -994,7 +997,10 @@ mod flatpak {
         {
             args.zed = Some("/app/libexec/zublime-editor".into());
             unsafe {
-                env::set_var("ZED_UPDATE_EXPLANATION", "Please use flatpak to update Zublime");
+                env::set_var(
+                    "ZED_UPDATE_EXPLANATION",
+                    "Please use flatpak to update Zublime",
+                );
             }
         }
         args

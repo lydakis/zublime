@@ -21,23 +21,23 @@ use futures::{StreamExt, stream::FuturesUnordered};
 use gpui::{
     Action, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Corner, Div,
     DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
-    Focusable, KeyContext, Modifiers, MouseButton, MouseDownEvent, NavigationDirection, Pixels,
-    Point, PromptLevel, Render, ScrollHandle, Subscription, Task, WeakEntity, WeakFocusHandle,
-    Window, actions, anchored, deferred, prelude::*,
+    Focusable, KeyContext, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
+    NavigationDirection, Pixels, Point, PromptLevel, Render, ScrollHandle, Subscription, Task,
+    WeakEntity, WeakFocusHandle, Window, actions, anchored, deferred, prelude::*,
 };
 use itertools::Itertools;
 use language::{Capability, DiagnosticSeverity};
 use parking_lot::Mutex;
 use project::{DirectoryLister, Project, ProjectEntryId, ProjectPath, WorktreeId};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
 use std::{
     any::Any,
     cmp, fmt, mem,
     num::NonZeroUsize,
     ops::ControlFlow,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{
         Arc,
@@ -51,6 +51,7 @@ use ui::{
     DividerColor, IconButtonShape, IconDecoration, IconDecorationKind, Indicator, PopoverMenu,
     PopoverMenuHandle, Tab, TabBar, TabPosition, Tooltip, prelude::*, right_click_menu,
 };
+use ui_input::{ERASED_EDITOR_FACTORY, ErasedEditor, ErasedEditorEvent};
 use util::{ResultExt, debug_panic, maybe, paths::PathStyle, truncate_and_remove_front};
 
 /// A selected entry in e.g. project panel.
@@ -61,7 +62,99 @@ pub struct SelectedEntry {
 }
 
 const MINIMAL_UI: bool = true;
-const VERTICAL_TAB_BAR_WIDTH: Pixels = px(148.0);
+const DEFAULT_VERTICAL_TAB_BAR_WIDTH: Pixels = px(148.0);
+const MIN_VERTICAL_TAB_BAR_WIDTH: Pixels = px(120.0);
+const MAX_VERTICAL_TAB_BAR_WIDTH: Pixels = px(420.0);
+const VERTICAL_TAB_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
+const MANUAL_GROUP_LOCAL_ID_MASK: u64 = u32::MAX as u64;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualTabGroup {
+    pub id: u64,
+    pub name: String,
+    pub order: u32,
+    #[serde(default = "default_manual_group_name_customized")]
+    pub name_customized: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupWatchConfig {
+    pub group_id: u64,
+    pub root_path: PathBuf,
+    #[serde(default)]
+    pub paused: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TabInstanceScope {
+    WatchGroup(u64),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PaneItemMetadata {
+    pub instance_scope: Option<TabInstanceScope>,
+    pub watch_origin_group_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PaneTabUiState {
+    #[serde(default = "default_vertical_tab_bar_width")]
+    pub vertical_tab_bar_width: f32,
+    #[serde(default)]
+    pub aliases_by_item: HashMap<u64, String>,
+    #[serde(default)]
+    pub manual_groups: Vec<ManualTabGroup>,
+    #[serde(default)]
+    pub memberships_by_item: HashMap<u64, u64>,
+    #[serde(default)]
+    pub active_horizontal_filter: Option<u64>,
+    #[serde(default)]
+    pub group_watch_configs: Vec<GroupWatchConfig>,
+    #[serde(default)]
+    pub collapsed_groups: HashSet<u64>,
+    #[serde(default = "default_next_manual_group_id")]
+    pub next_manual_group_id: u64,
+}
+
+impl Default for PaneTabUiState {
+    fn default() -> Self {
+        Self {
+            vertical_tab_bar_width: default_vertical_tab_bar_width(),
+            aliases_by_item: HashMap::default(),
+            manual_groups: Vec::new(),
+            memberships_by_item: HashMap::default(),
+            active_horizontal_filter: None,
+            group_watch_configs: Vec::new(),
+            collapsed_groups: HashSet::default(),
+            next_manual_group_id: default_next_manual_group_id(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct DraggedVerticalTabRail;
+
+impl Render for DraggedVerticalTabRail {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+fn default_vertical_tab_bar_width() -> f32 {
+    f32::from(DEFAULT_VERTICAL_TAB_BAR_WIDTH)
+}
+
+fn default_next_manual_group_id() -> u64 {
+    1
+}
+
+fn local_manual_group_id(group_id: u64) -> u64 {
+    group_id & MANUAL_GROUP_LOCAL_ID_MASK
+}
+
+fn default_manual_group_name_customized() -> bool {
+    true
+}
 
 #[derive(Clone, Copy)]
 enum TabBarOpenFileAction {
@@ -74,7 +167,7 @@ impl TabBarOpenFileAction {
     fn from_modifiers(modifiers: Modifiers) -> Self {
         if modifiers.alt && modifiers.shift {
             Self::WatchFolder
-        } else if modifiers.alt {
+        } else if modifiers.shift {
             Self::NewTerminalTab
         } else {
             Self::OpenFiles
@@ -323,6 +416,8 @@ actions!(
         TogglePinTab,
         /// Unpins all tabs in the pane.
         UnpinAllTabs,
+        /// Creates a new manual tab group in the active pane.
+        NewTabGroup,
     ]
 );
 
@@ -467,6 +562,11 @@ pub struct Pane {
     diagnostics: HashMap<ProjectPath, DiagnosticSeverity>,
     zoom_out_on_close: bool,
     diagnostic_summary_update: Task<()>,
+    tab_ui_state: PaneTabUiState,
+    item_metadata_by_item_id: HashMap<EntityId, PaneItemMetadata>,
+    renaming_group_id: Option<u64>,
+    renaming_group_editor: Option<Arc<dyn ErasedEditor>>,
+    renaming_group_editor_subscription: Option<Subscription>,
     /// If a certain project item wants to get recreated with specific data, it can persist its data before the recreation here.
     pub project_item_restoration_data: HashMap<ProjectItemKind, Box<dyn Any + Send>>,
     welcome_page: Option<Entity<crate::welcome::WelcomePage>>,
@@ -638,6 +738,11 @@ impl Pane {
             diagnostics: Default::default(),
             zoom_out_on_close: true,
             diagnostic_summary_update: Task::ready(()),
+            tab_ui_state: PaneTabUiState::default(),
+            item_metadata_by_item_id: HashMap::default(),
+            renaming_group_id: None,
+            renaming_group_editor: None,
+            renaming_group_editor_subscription: None,
             project_item_restoration_data: HashMap::default(),
             welcome_page: None,
             in_center_group: false,
@@ -1070,6 +1175,498 @@ impl Pane {
         self.pinned_tab_count
     }
 
+    pub fn tab_ui_state(&self) -> &PaneTabUiState {
+        &self.tab_ui_state
+    }
+
+    pub fn set_tab_ui_state(&mut self, mut tab_ui_state: PaneTabUiState) {
+        tab_ui_state.vertical_tab_bar_width = tab_ui_state.vertical_tab_bar_width.clamp(
+            f32::from(MIN_VERTICAL_TAB_BAR_WIDTH),
+            f32::from(MAX_VERTICAL_TAB_BAR_WIDTH),
+        );
+        let mut next_manual_group_id = local_manual_group_id(tab_ui_state.next_manual_group_id);
+        if next_manual_group_id == 0 {
+            next_manual_group_id = default_next_manual_group_id();
+        }
+
+        let max_existing_local_id = tab_ui_state
+            .manual_groups
+            .iter()
+            .map(|group| local_manual_group_id(group.id))
+            .max()
+            .unwrap_or_default();
+        if next_manual_group_id <= max_existing_local_id {
+            next_manual_group_id = max_existing_local_id.saturating_add(1);
+        }
+        tab_ui_state.next_manual_group_id = next_manual_group_id;
+
+        self.tab_ui_state = tab_ui_state;
+        self.prune_tab_ui_state();
+    }
+
+    pub fn manual_groups_sorted(&self) -> Vec<ManualTabGroup> {
+        let mut groups = self.tab_ui_state.manual_groups.clone();
+        groups.sort_by_key(|group| (group.order, group.name.clone(), group.id));
+        groups
+    }
+
+    pub fn has_manual_group(&self, group_id: u64) -> bool {
+        self.tab_ui_state
+            .manual_groups
+            .iter()
+            .any(|group| group.id == group_id)
+    }
+
+    pub fn manual_group_by_id(&self, group_id: u64) -> Option<ManualTabGroup> {
+        self.tab_ui_state
+            .manual_groups
+            .iter()
+            .find(|group| group.id == group_id)
+            .cloned()
+    }
+
+    pub fn ensure_manual_group(&mut self, group: ManualTabGroup) -> bool {
+        if let Some(existing_group) = self
+            .tab_ui_state
+            .manual_groups
+            .iter_mut()
+            .find(|existing_group| existing_group.id == group.id)
+        {
+            if *existing_group != group {
+                *existing_group = group;
+                return true;
+            }
+            return false;
+        }
+
+        self.tab_ui_state.manual_groups.push(group);
+        true
+    }
+
+    pub fn create_manual_group(
+        &mut self,
+        name: Option<String>,
+        pane_entity_id: EntityId,
+    ) -> ManualTabGroup {
+        let id = self.next_manual_group_id(pane_entity_id);
+        let name_customized = name.is_some();
+        let group = ManualTabGroup {
+            id,
+            name: name
+                .unwrap_or_else(|| format!("Group {}", self.tab_ui_state.manual_groups.len() + 1)),
+            order: self.tab_ui_state.manual_groups.len() as u32,
+            name_customized,
+        };
+        self.tab_ui_state.manual_groups.push(group.clone());
+        group
+    }
+
+    fn create_and_select_manual_group(&mut self, pane_entity_id: EntityId) -> ManualTabGroup {
+        let new_group = self.create_manual_group(None, pane_entity_id);
+        self.set_active_horizontal_filter(Some(new_group.id));
+        new_group
+    }
+
+    pub fn rename_manual_group(&mut self, group_id: u64, new_name: impl Into<String>) {
+        let new_name = new_name.into().trim().to_string();
+        if new_name.is_empty() {
+            return;
+        }
+        if let Some(group) = self
+            .tab_ui_state
+            .manual_groups
+            .iter_mut()
+            .find(|group| group.id == group_id)
+        {
+            group.name = new_name;
+            group.name_customized = true;
+        }
+    }
+
+    pub fn maybe_auto_name_group_from_watch_folder(
+        &mut self,
+        group_id: u64,
+        root_path: &Path,
+    ) -> bool {
+        let Some(group) = self
+            .tab_ui_state
+            .manual_groups
+            .iter_mut()
+            .find(|group| group.id == group_id)
+        else {
+            return false;
+        };
+        if group.name_customized {
+            return false;
+        }
+
+        let folder_name = root_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| root_path.to_string_lossy().into_owned());
+        if group.name == folder_name {
+            return false;
+        }
+        group.name = folder_name;
+        true
+    }
+
+    pub fn delete_manual_group(&mut self, group_id: u64) -> Vec<EntityId> {
+        let item_ids = self
+            .items
+            .iter()
+            .filter_map(|item| {
+                (self.group_for_item(item.item_id()) == Some(group_id)).then_some(item.item_id())
+            })
+            .collect::<Vec<_>>();
+        self.tab_ui_state
+            .manual_groups
+            .retain(|group| group.id != group_id);
+        self.tab_ui_state
+            .group_watch_configs
+            .retain(|config| config.group_id != group_id);
+        self.tab_ui_state.collapsed_groups.remove(&group_id);
+        self.tab_ui_state
+            .memberships_by_item
+            .retain(|_, entry_group_id| *entry_group_id != group_id);
+        if self.tab_ui_state.active_horizontal_filter == Some(group_id) {
+            self.tab_ui_state.active_horizontal_filter = None;
+        }
+        if self.renaming_group_id == Some(group_id) {
+            self.renaming_group_id = None;
+            self.renaming_group_editor = None;
+            self.renaming_group_editor_subscription = None;
+        }
+
+        item_ids
+    }
+
+    pub fn delete_group_and_close_items(
+        &mut self,
+        group_id: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.renaming_group_id == Some(group_id) {
+            self.finish_renaming_group(false, window, cx);
+        }
+        let item_ids = self.delete_manual_group(group_id);
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                workspace.stop_watching_group(group_id, cx)
+            });
+        }
+        for item_id in item_ids {
+            self.close_item_by_id(item_id, SaveIntent::Close, window, cx)
+                .detach_and_log_err(cx);
+        }
+    }
+
+    pub fn ensure_manual_group_for_watch(&mut self, pane_entity_id: EntityId) -> ManualTabGroup {
+        if let Some(active_group_id) = self.active_horizontal_filter()
+            && let Some(active_group) = self
+                .tab_ui_state
+                .manual_groups
+                .iter()
+                .find(|group| group.id == active_group_id)
+        {
+            return active_group.clone();
+        }
+
+        if let Some(first_group) = self.manual_groups_sorted().first() {
+            return first_group.clone();
+        }
+
+        self.create_manual_group(None, pane_entity_id)
+    }
+
+    pub fn assign_item_to_group(&mut self, item_id: EntityId, group_id: Option<u64>) {
+        let item_id = item_id.as_u64();
+        match group_id {
+            Some(group_id) => {
+                self.tab_ui_state
+                    .memberships_by_item
+                    .insert(item_id, group_id);
+            }
+            None => {
+                self.tab_ui_state.memberships_by_item.remove(&item_id);
+            }
+        }
+    }
+
+    pub fn group_for_item(&self, item_id: EntityId) -> Option<u64> {
+        self.tab_ui_state
+            .memberships_by_item
+            .get(&item_id.as_u64())
+            .copied()
+    }
+
+    pub fn watch_config_for_group(&self, group_id: u64) -> Option<&GroupWatchConfig> {
+        self.tab_ui_state
+            .group_watch_configs
+            .iter()
+            .find(|config| config.group_id == group_id)
+    }
+
+    pub fn upsert_group_watch_config(&mut self, group_id: u64, root_path: PathBuf, paused: bool) {
+        if let Some(config) = self
+            .tab_ui_state
+            .group_watch_configs
+            .iter_mut()
+            .find(|config| config.group_id == group_id)
+        {
+            config.root_path = root_path;
+            config.paused = paused;
+        } else {
+            self.tab_ui_state
+                .group_watch_configs
+                .push(GroupWatchConfig {
+                    group_id,
+                    root_path,
+                    paused,
+                });
+        }
+    }
+
+    pub fn ensure_group_watch_config(&mut self, config: GroupWatchConfig) -> bool {
+        if let Some(existing_config) = self
+            .tab_ui_state
+            .group_watch_configs
+            .iter_mut()
+            .find(|existing_config| existing_config.group_id == config.group_id)
+        {
+            if *existing_config != config {
+                *existing_config = config;
+                return true;
+            }
+            return false;
+        }
+
+        self.tab_ui_state.group_watch_configs.push(config);
+        true
+    }
+
+    pub fn set_group_watch_paused(&mut self, group_id: u64, paused: bool) -> bool {
+        if let Some(config) = self
+            .tab_ui_state
+            .group_watch_configs
+            .iter_mut()
+            .find(|config| config.group_id == group_id)
+        {
+            if config.paused != paused {
+                config.paused = paused;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn remove_group_watch_config(&mut self, group_id: u64) -> bool {
+        let before_len = self.tab_ui_state.group_watch_configs.len();
+        self.tab_ui_state
+            .group_watch_configs
+            .retain(|config| config.group_id != group_id);
+        self.tab_ui_state.group_watch_configs.len() != before_len
+    }
+
+    pub fn is_group_collapsed(&self, group_id: u64) -> bool {
+        self.tab_ui_state.collapsed_groups.contains(&group_id)
+    }
+
+    pub fn set_group_collapsed(&mut self, group_id: u64, collapsed: bool) {
+        if collapsed {
+            self.tab_ui_state.collapsed_groups.insert(group_id);
+        } else {
+            self.tab_ui_state.collapsed_groups.remove(&group_id);
+        }
+    }
+
+    pub fn toggle_group_collapsed(&mut self, group_id: u64) {
+        let should_collapse = !self.is_group_collapsed(group_id);
+        self.set_group_collapsed(group_id, should_collapse);
+    }
+
+    pub fn active_horizontal_filter(&self) -> Option<u64> {
+        self.tab_ui_state.active_horizontal_filter
+    }
+
+    pub fn set_active_horizontal_filter(&mut self, group_id: Option<u64>) {
+        self.tab_ui_state.active_horizontal_filter = group_id;
+    }
+
+    pub fn vertical_tab_bar_width(&self) -> Pixels {
+        px(self.tab_ui_state.vertical_tab_bar_width)
+    }
+
+    pub fn set_vertical_tab_bar_width(&mut self, width: Pixels) -> bool {
+        let clamped = f32::from(width).clamp(
+            f32::from(MIN_VERTICAL_TAB_BAR_WIDTH),
+            f32::from(MAX_VERTICAL_TAB_BAR_WIDTH),
+        );
+        let changed = (self.tab_ui_state.vertical_tab_bar_width - clamped).abs() > 0.5;
+        if changed {
+            self.tab_ui_state.vertical_tab_bar_width = clamped;
+        }
+        changed
+    }
+
+    pub fn reset_vertical_tab_bar_width(&mut self) -> bool {
+        self.set_vertical_tab_bar_width(DEFAULT_VERTICAL_TAB_BAR_WIDTH)
+    }
+
+    pub fn item_metadata_for(&self, item_id: EntityId) -> Option<&PaneItemMetadata> {
+        self.item_metadata_by_item_id.get(&item_id)
+    }
+
+    pub fn item_watch_origin_group(&self, item_id: EntityId) -> Option<u64> {
+        self.item_metadata_by_item_id
+            .get(&item_id)
+            .and_then(|metadata| metadata.watch_origin_group_id)
+    }
+
+    pub fn set_item_metadata(&mut self, item_id: EntityId, metadata: PaneItemMetadata) {
+        let has_metadata =
+            metadata.instance_scope.is_some() || metadata.watch_origin_group_id.is_some();
+        if has_metadata {
+            self.item_metadata_by_item_id.insert(item_id, metadata);
+        } else {
+            self.item_metadata_by_item_id.remove(&item_id);
+        }
+    }
+
+    pub fn take_item_metadata(&mut self, item_id: EntityId) -> Option<PaneItemMetadata> {
+        self.item_metadata_by_item_id.remove(&item_id)
+    }
+
+    fn clear_watch_metadata(metadata: &mut PaneItemMetadata, group_id: Option<u64>) -> bool {
+        let mut did_change = false;
+        if let Some(watch_origin_group_id) = metadata.watch_origin_group_id
+            && group_id.is_none_or(|group_id| group_id == watch_origin_group_id)
+        {
+            metadata.watch_origin_group_id = None;
+            did_change = true;
+        }
+        if let Some(TabInstanceScope::WatchGroup(scope_group_id)) = metadata.instance_scope.as_ref()
+            && group_id.is_none_or(|group_id| group_id == *scope_group_id)
+        {
+            metadata.instance_scope = None;
+            did_change = true;
+        }
+        did_change
+    }
+
+    pub fn clear_watch_metadata_for_item(&mut self, item_id: EntityId) -> bool {
+        let Some(mut metadata) = self.item_metadata_by_item_id.get(&item_id).cloned() else {
+            return false;
+        };
+        if !Self::clear_watch_metadata(&mut metadata, None) {
+            return false;
+        }
+        self.set_item_metadata(item_id, metadata);
+        true
+    }
+
+    pub fn clear_watch_metadata_for_group(&mut self, group_id: u64) -> bool {
+        let item_ids = self
+            .item_metadata_by_item_id
+            .iter()
+            .filter_map(|(item_id, metadata)| {
+                let watch_group_match = metadata.watch_origin_group_id == Some(group_id);
+                let scope_group_match = matches!(
+                    metadata.instance_scope.as_ref(),
+                    Some(TabInstanceScope::WatchGroup(scope_group_id)) if *scope_group_id == group_id
+                );
+                (watch_group_match || scope_group_match).then_some(*item_id)
+            })
+            .collect::<Vec<_>>();
+
+        let mut did_change = false;
+        for item_id in item_ids {
+            let Some(mut metadata) = self.item_metadata_by_item_id.get(&item_id).cloned() else {
+                continue;
+            };
+            if Self::clear_watch_metadata(&mut metadata, Some(group_id)) {
+                self.set_item_metadata(item_id, metadata);
+                did_change = true;
+            }
+        }
+        did_change
+    }
+
+    fn dedupe_scope_for_item(&self, item_id: EntityId) -> Option<&TabInstanceScope> {
+        self.item_metadata_by_item_id
+            .get(&item_id)
+            .and_then(|metadata| metadata.instance_scope.as_ref())
+    }
+
+    fn dedupe_scope_matches(
+        &self,
+        existing_item_id: EntityId,
+        requested_scope: Option<&TabInstanceScope>,
+    ) -> bool {
+        self.dedupe_scope_for_item(existing_item_id) == requested_scope
+    }
+
+    fn prune_tab_ui_state(&mut self) {
+        let item_ids = self
+            .items
+            .iter()
+            .map(|item| item.item_id().as_u64())
+            .collect::<HashSet<_>>();
+        let manual_group_ids = self
+            .tab_ui_state
+            .manual_groups
+            .iter()
+            .map(|group| group.id)
+            .collect::<HashSet<_>>();
+        self.tab_ui_state
+            .aliases_by_item
+            .retain(|item_id, _| item_ids.contains(item_id));
+        self.tab_ui_state
+            .memberships_by_item
+            .retain(|item_id, group_id| {
+                item_ids.contains(item_id) && manual_group_ids.contains(group_id)
+            });
+        self.tab_ui_state
+            .group_watch_configs
+            .retain(|config| manual_group_ids.contains(&config.group_id));
+        self.tab_ui_state
+            .collapsed_groups
+            .retain(|group_id| manual_group_ids.contains(group_id));
+        if let Some(active_group_id) = self.tab_ui_state.active_horizontal_filter
+            && !manual_group_ids.contains(&active_group_id)
+        {
+            self.tab_ui_state.active_horizontal_filter = None;
+        }
+        self.item_metadata_by_item_id
+            .retain(|item_id, _| item_ids.contains(&item_id.as_u64()));
+        if let Some(renaming_group_id) = self.renaming_group_id
+            && !manual_group_ids.contains(&renaming_group_id)
+        {
+            self.renaming_group_id = None;
+            self.renaming_group_editor = None;
+            self.renaming_group_editor_subscription = None;
+        }
+    }
+
+    fn next_manual_group_id(&mut self, pane_entity_id: EntityId) -> u64 {
+        let mut local = local_manual_group_id(self.tab_ui_state.next_manual_group_id).max(1);
+        let pane_prefix = pane_entity_id.as_u64() << 32;
+        let mut candidate = pane_prefix | local;
+        while self
+            .tab_ui_state
+            .manual_groups
+            .iter()
+            .any(|group| group.id == candidate)
+        {
+            local = local.saturating_add(1);
+            candidate = pane_prefix | local;
+        }
+        self.tab_ui_state.next_manual_group_id = local.saturating_add(1);
+        candidate
+    }
+
     pub fn handle_item_edit(&mut self, item_id: EntityId, cx: &App) {
         if let Some(preview_item) = self.preview_item()
             && preview_item.item_id() == item_id
@@ -1087,14 +1684,18 @@ impl Pane {
         allow_preview: bool,
         activate: bool,
         suggested_position: Option<usize>,
+        instance_scope: Option<TabInstanceScope>,
+        watch_origin_group_id: Option<u64>,
         window: &mut Window,
         cx: &mut Context<Self>,
         build_item: WorkspaceItemBuilder,
     ) -> Box<dyn ItemHandle> {
+        let requested_scope = instance_scope.as_ref();
         let mut existing_item = None;
         if let Some(project_entry_id) = project_entry_id {
             for (index, item) in self.items.iter().enumerate() {
                 if item.buffer_kind(cx) == ItemBufferKind::Singleton
+                    && self.dedupe_scope_matches(item.item_id(), requested_scope)
                     && item.project_entry_ids(cx).as_slice() == [project_entry_id]
                 {
                     let item = item.boxed_clone();
@@ -1105,6 +1706,7 @@ impl Pane {
         } else {
             for (index, item) in self.items.iter().enumerate() {
                 if item.buffer_kind(cx) == ItemBufferKind::Singleton
+                    && self.dedupe_scope_matches(item.item_id(), requested_scope)
                     && item.project_path(cx).as_ref() == Some(&project_path)
                 {
                     let item = item.boxed_clone();
@@ -1142,6 +1744,10 @@ impl Pane {
                 focus_item,
                 activate,
                 destination_index,
+                Some(PaneItemMetadata {
+                    instance_scope: instance_scope.clone(),
+                    watch_origin_group_id,
+                }),
                 window,
                 cx,
             );
@@ -1231,6 +1837,7 @@ impl Pane {
         focus_item: bool,
         activate: bool,
         destination_index: Option<usize>,
+        item_metadata: Option<PaneItemMetadata>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1279,11 +1886,20 @@ impl Pane {
         } else {
             None
         };
+        let requested_scope = item_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.instance_scope.as_ref())
+            .cloned();
 
+        let metadata_for_existing = item_metadata.clone();
+        let metadata_for_new = item_metadata;
         let existing_item_index = self.items.iter().position(|existing_item| {
             if existing_item.item_id() == item.item_id() {
                 true
             } else if existing_item.buffer_kind(cx) == ItemBufferKind::Singleton {
+                if !self.dedupe_scope_matches(existing_item.item_id(), requested_scope.as_ref()) {
+                    return false;
+                }
                 existing_item
                     .project_entry_ids(cx)
                     .first()
@@ -1326,8 +1942,27 @@ impl Pane {
             if activate {
                 self.activate_item(insertion_index, activate_pane, focus_item, window, cx);
             }
+
+            if let Some(metadata) = metadata_for_existing {
+                let metadata_group = metadata.watch_origin_group_id;
+                self.set_item_metadata(item.item_id(), metadata);
+                if let Some(group_id) = metadata_group {
+                    self.assign_item_to_group(item.item_id(), Some(group_id));
+                }
+            }
         } else {
             self.items.insert(insertion_index, item.clone());
+
+            if let Some(metadata) = metadata_for_new {
+                let metadata_group = metadata.watch_origin_group_id;
+                self.set_item_metadata(item.item_id(), metadata);
+                if let Some(group_id) = metadata_group {
+                    self.assign_item_to_group(item.item_id(), Some(group_id));
+                }
+            } else if let Some(active_filter) = self.tab_ui_state.active_horizontal_filter {
+                self.assign_item_to_group(item.item_id(), Some(active_filter));
+            }
+
             cx.notify();
 
             if activate {
@@ -1363,6 +1998,7 @@ impl Pane {
             focus_item,
             true,
             destination_index,
+            None,
             window,
             cx,
         )
@@ -2159,6 +2795,13 @@ impl Pane {
         }
 
         let item = self.items.remove(item_index);
+        self.item_metadata_by_item_id.remove(&item.item_id());
+        self.tab_ui_state
+            .aliases_by_item
+            .remove(&item.item_id().as_u64());
+        self.tab_ui_state
+            .memberships_by_item
+            .remove(&item.item_id().as_u64());
 
         cx.emit(Event::RemovedItem { item: item.clone() });
         if self.items.is_empty() {
@@ -2726,32 +3369,26 @@ impl Pane {
     ) -> impl IntoElement + use<> {
         let is_active = ix == self.active_item_index;
         let item_id = item.item_id();
-        let is_watched = self
-            .workspace
-            .upgrade()
-            .and_then(|workspace| {
-                workspace
-                    .read(cx)
-                    .watch_folder_state()
-                    .map(|state| state.watched_item_ids.contains_key(&item_id))
-            })
-            .unwrap_or(false);
+        let is_watched = self.item_watch_origin_group(item_id).is_some();
         let is_preview = self
             .preview_item_id
             .map(|id| id == item_id)
             .unwrap_or(false)
             || is_watched;
 
-        let label = item.tab_content(
-            TabContentParams {
-                detail: Some(detail),
-                selected: is_active,
-                preview: is_preview,
-                deemphasized: !self.has_focus(window, cx),
-            },
-            window,
-            cx,
-        );
+        let default_label = item
+            .tab_content(
+                TabContentParams {
+                    detail: Some(detail),
+                    selected: is_active,
+                    preview: is_preview,
+                    deemphasized: !self.has_focus(window, cx),
+                },
+                window,
+                cx,
+            )
+            .into_any_element();
+        let label = default_label;
 
         let item_diagnostic = item
             .project_path(cx)
@@ -3190,6 +3827,65 @@ impl Pane {
                             })
                         };
 
+                        let groups = pane.read_with(cx, |pane, _| pane.manual_groups_sorted());
+                        let active_group =
+                            pane.read_with(cx, |pane, _| pane.group_for_item(item_id));
+                        menu = menu.separator().entry(
+                            "New Tab Group",
+                            Some(Box::new(NewTabGroup)),
+                            window.handler_for(&pane, move |pane, _, cx| {
+                                let pane_entity_id = cx.entity_id();
+                                let new_group = pane.create_and_select_manual_group(pane_entity_id);
+                                pane.assign_item_to_group(item_id, Some(new_group.id));
+                                cx.notify();
+                            }),
+                        );
+                        if !groups.is_empty() {
+                            menu = menu.submenu("Move To Group", {
+                                let pane = pane.clone();
+                                move |submenu, _, _| {
+                                    let mut submenu = submenu.entry(
+                                        if active_group.is_none() {
+                                            "Ungrouped ✓"
+                                        } else {
+                                            "Ungrouped"
+                                        },
+                                        None,
+                                        {
+                                            let pane = pane.clone();
+                                            move |_, cx| {
+                                                let _ = pane.update(cx, |pane, cx| {
+                                                    pane.assign_item_to_group(item_id, None);
+                                                    cx.notify();
+                                                });
+                                            }
+                                        },
+                                    );
+                                    for group in groups.clone() {
+                                        let is_selected = active_group == Some(group.id);
+                                        let label = if is_selected {
+                                            format!("{} ✓", group.name)
+                                        } else {
+                                            group.name.clone()
+                                        };
+                                        submenu = submenu.entry(label, None, {
+                                            let pane = pane.clone();
+                                            move |_, cx| {
+                                                let _ = pane.update(cx, |pane, cx| {
+                                                    pane.assign_item_to_group(
+                                                        item_id,
+                                                        Some(group.id),
+                                                    );
+                                                    cx.notify();
+                                                });
+                                            }
+                                        });
+                                    }
+                                    submenu
+                                }
+                            });
+                        }
+
                         if capability != Capability::ReadOnly {
                             let read_only_label = if capability.editable() {
                                 "Make File Read-Only"
@@ -3443,8 +4139,11 @@ impl Pane {
             .enumerate()
             .zip(tab_details(&self.items, window, cx))
             .map(|((ix, item), detail)| {
-                self.render_tab(ix, &**item, detail, &focus_handle, window, cx)
-                    .into_any_element()
+                (
+                    ix,
+                    self.render_tab(ix, &**item, detail, &focus_handle, window, cx)
+                        .into_any_element(),
+                )
             })
             .collect::<Vec<_>>();
         let tab_count = tab_items.len();
@@ -3458,8 +4157,20 @@ impl Pane {
             );
             self.pinned_tab_count = tab_count;
         }
-        let unpinned_tabs = tab_items.split_off(self.pinned_tab_count);
-        let pinned_tabs = tab_items;
+        let mut unpinned_tabs = tab_items.split_off(self.pinned_tab_count);
+        let pinned_tabs = tab_items
+            .into_iter()
+            .map(|(_, element)| element)
+            .collect::<Vec<_>>();
+        if let Some(active_group_filter) = self.active_horizontal_filter() {
+            unpinned_tabs.retain(|(index, _)| {
+                self.group_for_item(self.items[*index].item_id()) == Some(active_group_filter)
+            });
+        }
+        let unpinned_tabs = unpinned_tabs
+            .into_iter()
+            .map(|(_, element)| element)
+            .collect::<Vec<_>>();
 
         let render_aside_toggle_left = cx.has_flag::<AgentV2FeatureFlag>()
             && self
@@ -3492,7 +4203,7 @@ impl Pane {
         let tab_bar_settings = TabBarSettings::get_global(cx);
         let use_separate_rows = tab_bar_settings.show_pinned_tabs_in_separate_row;
 
-        if use_separate_rows && !pinned_tabs.is_empty() && !unpinned_tabs.is_empty() {
+        let tab_bar = if use_separate_rows && !pinned_tabs.is_empty() && !unpinned_tabs.is_empty() {
             self.render_two_row_tab_bar(
                 pinned_tabs,
                 unpinned_tabs,
@@ -3520,7 +4231,122 @@ impl Pane {
                 window,
                 cx,
             )
+        };
+
+        if let Some(group_chip_row) = self.render_horizontal_group_chips(window, cx) {
+            v_flex()
+                .w_full()
+                .flex_none()
+                .child(group_chip_row)
+                .child(tab_bar)
+                .into_any_element()
+        } else {
+            tab_bar
         }
+    }
+
+    fn render_horizontal_group_chips(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Pane>,
+    ) -> Option<AnyElement> {
+        let groups = self.manual_groups_sorted();
+        if groups.is_empty() {
+            return None;
+        }
+
+        let pane = cx.entity().downgrade();
+        let pane_for_all = pane.clone();
+        let pane_entity_id = cx.entity_id();
+        let selected_group_id = self.active_horizontal_filter();
+        let watched_group_ids = self
+            .tab_ui_state
+            .group_watch_configs
+            .iter()
+            .map(|config| config.group_id)
+            .collect::<HashSet<_>>();
+
+        Some(
+            h_flex()
+                .id("pane-horizontal-group-chips")
+                .w_full()
+                .flex_none()
+                .overflow_x_scroll()
+                .gap_1()
+                .px_2()
+                .py_1()
+                .bg(cx.theme().colors().tab_bar_background)
+                .border_b_1()
+                .border_color(cx.theme().colors().border_variant)
+                .child(
+                    ButtonLike::new("pane-group-chip-all")
+                        .toggle_state(selected_group_id.is_none())
+                        .size(ButtonSize::Compact)
+                        .child(Label::new("All").size(LabelSize::Small))
+                        .on_click(move |_, _, cx| {
+                            let _ = pane_for_all.update(cx, |pane, cx| {
+                                pane.set_active_horizontal_filter(None);
+                                cx.notify();
+                            });
+                        }),
+                )
+                .children(groups.into_iter().map(|group| {
+                    let pane_for_click = pane.clone();
+                    let pane_for_editor = pane.clone();
+                    let pane_for_menu = pane.clone();
+                    let is_selected = selected_group_id == Some(group.id);
+                    let is_watched = watched_group_ids.contains(&group.id);
+                    let is_renaming = self.is_renaming_group(group.id);
+                    let renaming_group_editor = if is_renaming {
+                        self.renaming_group_editor.clone()
+                    } else {
+                        None
+                    };
+                    let chip = ButtonLike::new(("pane-group-chip", group.id))
+                        .toggle_state(is_selected)
+                        .size(ButtonSize::Compact)
+                        .child(
+                            h_flex()
+                                .gap_0p5()
+                                .items_center()
+                                .child(Self::render_group_name_with_inline_editor(
+                                    pane_for_editor,
+                                    group.name.clone(),
+                                    LabelSize::Small,
+                                    None,
+                                    is_renaming,
+                                    renaming_group_editor,
+                                    window,
+                                    cx,
+                                ))
+                                .when(is_watched, |this| {
+                                    this.child(
+                                        Label::new("*").size(LabelSize::Small).color(Color::Muted),
+                                    )
+                                }),
+                        )
+                        .on_click(move |_, _, cx| {
+                            let _ = pane_for_click.update(cx, |pane, cx| {
+                                pane.set_active_horizontal_filter(Some(group.id));
+                                cx.notify();
+                            });
+                        });
+
+                    right_click_menu(("horizontal-tab-group-chip", group.id))
+                        .trigger(move |_, _, _| chip)
+                        .menu(move |window, cx| {
+                            Self::build_group_context_menu(
+                                pane_for_menu.clone(),
+                                pane_entity_id,
+                                group.id,
+                                window,
+                                cx,
+                            )
+                        })
+                        .into_any_element()
+                }))
+                .into_any_element(),
+        )
     }
 
     fn configure_tab_bar_start(
@@ -3702,7 +4528,7 @@ impl Pane {
         tab_count: usize,
         cx: &mut Context<Pane>,
     ) -> impl IntoElement {
-        div()
+        let drop_target = div()
             .id("tab_bar_drop_target")
             .min_w_6()
             // HACK: This empty child is currently necessary to force the drop target to appear
@@ -3742,7 +4568,443 @@ impl Pane {
                 if event.click_count() == 2 {
                     window.dispatch_action(this.double_click_dispatch_action.boxed_clone(), cx);
                 }
-            }))
+            }));
+
+        let pane = cx.entity().downgrade();
+        right_click_menu(("tab-bar-drop-target", cx.entity_id()))
+            .trigger(move |_, _, _| drop_target)
+            .menu(move |window, cx| {
+                Self::build_new_tab_group_context_menu(pane.clone(), window, cx)
+            })
+    }
+
+    fn is_renaming_group(&self, group_id: u64) -> bool {
+        self.renaming_group_id == Some(group_id) && self.renaming_group_editor.is_some()
+    }
+
+    fn begin_renaming_group(&mut self, group_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(group_name) = self
+            .tab_ui_state
+            .manual_groups
+            .iter()
+            .find(|group| group.id == group_id)
+            .map(|group| group.name.clone())
+        else {
+            return;
+        };
+
+        if self.renaming_group_id == Some(group_id) {
+            if let Some(editor) = self.renaming_group_editor.as_ref() {
+                editor.focus_handle(cx).focus(window, cx);
+            }
+            return;
+        }
+
+        self.finish_renaming_group(false, window, cx);
+
+        let Some(editor_factory) = ERASED_EDITOR_FACTORY.get() else {
+            log::warn!("group rename editor is unavailable");
+            return;
+        };
+
+        let editor = (editor_factory)(window, cx);
+        let pane = cx.entity().downgrade();
+        let editor_for_blur = editor.clone();
+        let subscription = editor.subscribe(
+            Box::new(move |event, window, cx| {
+                if event != ErasedEditorEvent::Blurred {
+                    return;
+                }
+
+                let Some(pane) = pane.upgrade() else {
+                    return;
+                };
+                let editor_for_blur = editor_for_blur.clone();
+                let _ = pane.update(cx, |pane, cx| {
+                    let still_current = pane
+                        .renaming_group_editor
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, &editor_for_blur));
+                    if still_current && !editor_for_blur.focus_handle(cx).is_focused(window) {
+                        pane.finish_renaming_group(false, window, cx);
+                    }
+                });
+            }),
+            window,
+            cx,
+        );
+
+        editor.set_text(&group_name, window, cx);
+        editor.move_selection_to_end(window, cx);
+        editor.focus_handle(cx).focus(window, cx);
+
+        self.renaming_group_id = Some(group_id);
+        self.renaming_group_editor = Some(editor);
+        self.renaming_group_editor_subscription = Some(subscription);
+        cx.notify();
+    }
+
+    fn finish_renaming_group(&mut self, save: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(group_id) = self.renaming_group_id.take() else {
+            return;
+        };
+        let Some(editor) = self.renaming_group_editor.take() else {
+            self.renaming_group_editor_subscription = None;
+            return;
+        };
+        self.renaming_group_editor_subscription = None;
+
+        if save {
+            let new_name = editor.text(cx).trim().to_string();
+            if !new_name.is_empty() {
+                self.rename_manual_group(group_id, new_name);
+            }
+        }
+
+        cx.notify();
+        self.focus_handle.focus(window, cx);
+    }
+
+    fn render_group_name_with_inline_editor(
+        pane: WeakEntity<Pane>,
+        group_name: String,
+        label_size: LabelSize,
+        label_color: Option<Color>,
+        is_renaming: bool,
+        renaming_group_editor: Option<Arc<dyn ErasedEditor>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let label = Label::new(group_name)
+            .size(label_size)
+            .single_line()
+            .truncate()
+            .map(|label| {
+                if let Some(color) = label_color {
+                    label.color(color)
+                } else {
+                    label
+                }
+            })
+            .when(is_renaming, |label| label.alpha(0.));
+
+        div()
+            .relative()
+            .min_w_0()
+            .child(label)
+            .when_some(renaming_group_editor, |this, editor| {
+                let pane_for_confirm = pane.clone();
+                let pane_for_cancel = pane.clone();
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .child(editor.render(window, cx))
+                        .on_action(move |_: &menu::Confirm, window, cx| {
+                            let _ = pane_for_confirm.update(cx, |pane, cx| {
+                                pane.finish_renaming_group(true, window, cx);
+                            });
+                        })
+                        .on_action(move |_: &menu::Cancel, window, cx| {
+                            let _ = pane_for_cancel.update(cx, |pane, cx| {
+                                pane.finish_renaming_group(false, window, cx);
+                            });
+                        }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn build_new_tab_group_context_menu(
+        pane: WeakEntity<Pane>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<ContextMenu> {
+        ContextMenu::build(window, cx, move |menu, _window, _cx| {
+            menu.entry("New Tab Group", Some(Box::new(NewTabGroup)), {
+                let pane = pane.clone();
+                move |_, cx| {
+                    let _ = pane.update(cx, |pane, cx| {
+                        pane.create_and_select_manual_group(cx.entity_id());
+                        cx.notify();
+                    });
+                }
+            })
+        })
+    }
+
+    fn build_group_context_menu(
+        pane: WeakEntity<Pane>,
+        pane_entity_id: EntityId,
+        group_id: u64,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<ContextMenu> {
+        ContextMenu::build(window, cx, move |mut menu, _window, cx| {
+            menu = menu.entry("New Tab Group", Some(Box::new(NewTabGroup)), {
+                let pane = pane.clone();
+                move |_, cx| {
+                    let _ = pane.update(cx, |pane, cx| {
+                        pane.create_and_select_manual_group(cx.entity_id());
+                        cx.notify();
+                    });
+                }
+            });
+            menu = menu.separator();
+
+            let watch_config = pane
+                .read_with(cx, |pane, _| pane.watch_config_for_group(group_id).cloned())
+                .ok()
+                .flatten();
+            let is_collapsed = pane
+                .read_with(cx, |pane, _| pane.is_group_collapsed(group_id))
+                .unwrap_or(false);
+
+            let collapse_title = if is_collapsed {
+                "Unfold Group"
+            } else {
+                "Fold Group"
+            };
+            menu = menu.entry(collapse_title, None, {
+                let pane = pane.clone();
+                move |_, cx| {
+                    let _ = pane.update(cx, |pane, cx| {
+                        pane.set_group_collapsed(group_id, !is_collapsed);
+                        cx.notify();
+                    });
+                }
+            });
+
+            let watch_entry_title = if watch_config.is_some() {
+                "Change Watched Folder..."
+            } else {
+                "Set Watched Folder..."
+            };
+            menu = menu.entry(watch_entry_title, None, {
+                let pane = pane.clone();
+                move |window, cx| {
+                    let _ = pane.update(cx, |pane, cx| {
+                        if let Some(workspace) = pane.workspace.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.prompt_watch_folder_for_group(
+                                    group_id,
+                                    pane_entity_id,
+                                    window,
+                                    cx,
+                                );
+                            });
+                        }
+                    });
+                }
+            });
+
+            if let Some(config) = watch_config {
+                if config.paused {
+                    menu = menu.entry("Resume Watch", None, {
+                        let pane = pane.clone();
+                        move |window, cx| {
+                            let _ = pane.update(cx, |pane, cx| {
+                                pane.set_group_watch_paused(group_id, false);
+                                if let Some(workspace) = pane.workspace.upgrade() {
+                                    workspace.update(cx, |workspace, cx| {
+                                        workspace
+                                            .set_watch_group_paused(group_id, false, window, cx);
+                                    });
+                                }
+                                cx.notify();
+                            });
+                        }
+                    });
+                } else {
+                    menu = menu.entry("Pause Watch", None, {
+                        let pane = pane.clone();
+                        move |window, cx| {
+                            let _ = pane.update(cx, |pane, cx| {
+                                pane.set_group_watch_paused(group_id, true);
+                                if let Some(workspace) = pane.workspace.upgrade() {
+                                    workspace.update(cx, |workspace, cx| {
+                                        workspace
+                                            .set_watch_group_paused(group_id, true, window, cx);
+                                    });
+                                }
+                                cx.notify();
+                            });
+                        }
+                    });
+                }
+                menu = menu.entry("Stop Watching", None, {
+                    let pane = pane.clone();
+                    move |_, cx| {
+                        let _ = pane.update(cx, |pane, cx| {
+                            pane.remove_group_watch_config(group_id);
+                            if let Some(workspace) = pane.workspace.upgrade() {
+                                workspace.update(cx, |workspace, cx| {
+                                    workspace.stop_watching_group(group_id, cx);
+                                });
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+
+            menu = menu.separator();
+            menu = menu.entry("Rename Group", None, {
+                let pane = pane.clone();
+                move |window, cx| {
+                    let _ = pane.update(cx, |pane, cx| {
+                        pane.begin_renaming_group(group_id, window, cx);
+                    });
+                }
+            });
+            menu = menu.entry("Delete Group", None, {
+                let pane = pane.clone();
+                move |window, cx| {
+                    let _ = pane.update(cx, |pane, cx| {
+                        pane.delete_group_and_close_items(group_id, window, cx);
+                        cx.notify();
+                    });
+                }
+            });
+            menu
+        })
+    }
+
+    fn render_vertical_group_header(
+        &self,
+        group: &ManualTabGroup,
+        _window: &mut Window,
+        cx: &mut Context<Pane>,
+    ) -> AnyElement {
+        let pane_for_trigger = cx.entity().downgrade();
+        let pane_for_menu = pane_for_trigger.clone();
+        let pane_entity_id = cx.entity_id();
+        let group_id = group.id;
+        let group_name = group.name.clone();
+        let watch_config = self.watch_config_for_group(group_id).cloned();
+        let is_collapsed = self.is_group_collapsed(group_id);
+        let is_renaming = self.is_renaming_group(group_id);
+        let renaming_group_editor = if is_renaming {
+            self.renaming_group_editor.clone()
+        } else {
+            None
+        };
+
+        right_click_menu(("vertical-tab-group-header", group_id))
+            .trigger(move |_, window, cx| {
+                let pane_for_toggle = pane_for_trigger.clone();
+                h_flex()
+                    .w_full()
+                    .px_2()
+                    .pt_2()
+                    .pb_1()
+                    .items_center()
+                    .gap_1()
+                    .on_mouse_down(MouseButton::Left, move |_: &MouseDownEvent, _, cx| {
+                        let _ = pane_for_toggle.update(cx, |pane, cx| {
+                            if pane.is_renaming_group(group_id) {
+                                return;
+                            }
+                            pane.toggle_group_collapsed(group_id);
+                            cx.notify();
+                        });
+                    })
+                    .child(
+                        Icon::new(if is_collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                    )
+                    .child(div().flex_1().min_w_0().child(
+                        Self::render_group_name_with_inline_editor(
+                            pane_for_trigger.clone(),
+                            group_name.clone(),
+                            LabelSize::Small,
+                            Some(Color::Muted),
+                            is_renaming,
+                            renaming_group_editor.clone(),
+                            window,
+                            cx,
+                        ),
+                    ))
+                    .map(|this| {
+                        if let Some(config) = watch_config.as_ref() {
+                            this.child(
+                                Label::new(if config.paused {
+                                    "Paused".to_string()
+                                } else {
+                                    "Watching".to_string()
+                                })
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            )
+                        } else {
+                            this
+                        }
+                    })
+                    .bg(cx.theme().colors().tab_bar_background)
+            })
+            .menu(move |window, cx| {
+                Self::build_group_context_menu(
+                    pane_for_menu.clone(),
+                    pane_entity_id,
+                    group_id,
+                    window,
+                    cx,
+                )
+            })
+            .into_any_element()
+    }
+
+    fn grouped_vertical_unpinned_tabs(
+        &self,
+        unpinned_tabs: Vec<(usize, AnyElement)>,
+    ) -> Vec<(Option<ManualTabGroup>, Vec<AnyElement>)> {
+        let mut tabs_by_group = HashMap::<Option<u64>, Vec<(usize, AnyElement)>>::default();
+        for (index, tab) in unpinned_tabs {
+            let group_id = self.group_for_item(self.items[index].item_id());
+            tabs_by_group
+                .entry(group_id)
+                .or_default()
+                .push((index, tab));
+        }
+
+        let mut result = Vec::new();
+        if let Some(ungrouped_tabs) = tabs_by_group.remove(&None) {
+            result.push((
+                None,
+                ungrouped_tabs
+                    .into_iter()
+                    .map(|(_, element)| element)
+                    .collect::<Vec<_>>(),
+            ));
+        }
+
+        for group in self.manual_groups_sorted() {
+            let group_tabs = tabs_by_group
+                .remove(&Some(group.id))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, element)| element)
+                .collect::<Vec<_>>();
+            result.push((Some(group), group_tabs));
+        }
+
+        for (_, tabs) in tabs_by_group {
+            result.push((
+                None,
+                tabs.into_iter()
+                    .map(|(_, element)| element)
+                    .collect::<Vec<_>>(),
+            ));
+        }
+        result
     }
 
     fn render_vertical_tab_bar(
@@ -3761,10 +5023,13 @@ impl Pane {
             .enumerate()
             .zip(tab_details(&self.items, window, cx))
             .map(|((ix, item), detail)| {
-                div()
-                    .w_full()
-                    .child(self.render_tab(ix, &**item, detail, &focus_handle, window, cx))
-                    .into_any_element()
+                (
+                    ix,
+                    div()
+                        .w_full()
+                        .child(self.render_tab(ix, &**item, detail, &focus_handle, window, cx))
+                        .into_any_element(),
+                )
             })
             .collect::<Vec<_>>();
 
@@ -3781,13 +5046,19 @@ impl Pane {
         }
 
         let unpinned_tabs = tab_items.split_off(self.pinned_tab_count);
-        let pinned_tabs = tab_items;
+        let pinned_tabs = tab_items
+            .into_iter()
+            .map(|(_, element)| element)
+            .collect::<Vec<_>>();
         let has_pinned_tabs = !pinned_tabs.is_empty();
-        let has_unpinned_tabs = !unpinned_tabs.is_empty();
+        let grouped_unpinned_tabs = self.grouped_vertical_unpinned_tabs(unpinned_tabs);
+        let has_unpinned_tabs = grouped_unpinned_tabs
+            .iter()
+            .any(|(_, tabs)| !tabs.is_empty());
 
         v_flex()
             .id("vertical_tab_bar")
-            .w(VERTICAL_TAB_BAR_WIDTH)
+            .w(self.vertical_tab_bar_width())
             .h_full()
             .flex_none()
             .overflow_y_scroll()
@@ -3804,8 +5075,70 @@ impl Pane {
             .when(has_unpinned_tabs && has_pinned_tabs, |this| {
                 this.child(Divider::horizontal().color(DividerColor::BorderVariant))
             })
-            .children(unpinned_tabs)
+            .children(grouped_unpinned_tabs.into_iter().flat_map(|(group, tabs)| {
+                if tabs.is_empty() && group.is_none() {
+                    return Vec::new();
+                }
+                let mut section = Vec::new();
+                if let Some(group) = group {
+                    let is_collapsed = self.is_group_collapsed(group.id);
+                    section.push(self.render_vertical_group_header(&group, window, cx));
+                    if !is_collapsed {
+                        section.extend(tabs);
+                    }
+                } else {
+                    section.extend(tabs);
+                }
+                section
+            }))
+            .child({
+                let pane = cx.entity().downgrade();
+                right_click_menu(("vertical-tab-bar-empty-target", cx.entity_id()))
+                    .trigger(|_, _, _| div().w_full().min_h_8().flex_grow())
+                    .menu(move |window, cx| {
+                        Self::build_new_tab_group_context_menu(pane.clone(), window, cx)
+                    })
+            })
             .into_any_element()
+    }
+
+    fn render_vertical_tab_resize_handle(&self, cx: &mut Context<Pane>) -> AnyElement {
+        let handle = div()
+            .id("vertical-tab-bar-resize-handle")
+            .on_drag(DraggedVerticalTabRail, move |payload, _, _, cx| {
+                cx.stop_propagation();
+                cx.new(|_| payload.clone())
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|pane, event: &MouseUpEvent, window, cx| {
+                    if event.click_count == 2 && pane.reset_vertical_tab_bar_width() {
+                        if let Some(workspace) = pane.workspace.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.serialize_workspace(window, cx)
+                            });
+                        }
+                        cx.notify();
+                    }
+                }),
+            )
+            .occlude();
+        deferred(
+            handle
+                .absolute()
+                .right(-VERTICAL_TAB_RESIZE_HANDLE_SIZE / 2.)
+                .top(px(0.))
+                .h_full()
+                .w(VERTICAL_TAB_RESIZE_HANDLE_SIZE)
+                .cursor_col_resize(),
+        )
+        .into_any_element()
     }
 
     fn render_open_file_button_horizontal(
@@ -4096,6 +5429,8 @@ impl Pane {
                                                 false,
                                                 true,
                                                 target,
+                                                None,
+                                                None,
                                                 window,
                                                 cx,
                                                 build_item,
@@ -4306,9 +5641,11 @@ fn default_render_tab_bar_buttons(
                 .anchor(Corner::TopRight)
                 .with_handle(pane.new_item_context_menu_handle.clone())
                 .menu(move |window, cx| {
-                    Some(ContextMenu::build(window, cx, |menu, _, _| {
+                    Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
                         menu.action("New File", NewFile.boxed_clone())
                             .action("Open File", ToggleFileFinder::default().boxed_clone())
+                            .separator()
+                            .action("New Tab Group", NewTabGroup.boxed_clone())
                             .separator()
                             .action(
                                 "Search Project",
@@ -4396,9 +5733,7 @@ impl Render for Pane {
         let should_display_tab_bar = self.should_display_tab_bar.clone();
         let display_tab_bar = should_display_tab_bar(window, cx);
         let tab_bar_layout = TabBarSettings::get_global(cx).layout;
-        let use_vertical_tabs = display_tab_bar
-            && self.active_item().is_some()
-            && tab_bar_layout == TabBarLayout::Vertical;
+        let use_vertical_tabs = display_tab_bar && tab_bar_layout == TabBarLayout::Vertical;
         let Some(project) = self.project.upgrade() else {
             return div().track_focus(&self.focus_handle(cx));
         };
@@ -4472,6 +5807,10 @@ impl Render for Pane {
             .on_action(cx.listener(Self::swap_item_right))
             .on_action(cx.listener(Self::toggle_pin_tab))
             .on_action(cx.listener(Self::unpin_all_tabs))
+            .on_action(cx.listener(|pane: &mut Pane, _: &NewTabGroup, _, cx| {
+                pane.create_and_select_manual_group(cx.entity_id());
+                cx.notify();
+            }))
             .when(PreviewTabsSettings::get_global(cx).enabled, |this| {
                 this.on_action(
                     cx.listener(|pane: &mut Pane, _: &TogglePreviewTab, window, cx| {
@@ -4542,8 +5881,10 @@ impl Render for Pane {
                     }
                 }),
             )
-            .on_action(cx.listener(|_, _: &menu::Cancel, window, cx| {
-                if cx.stop_active_drag(window) {
+            .on_action(cx.listener(|pane, _: &menu::Cancel, window, cx| {
+                if pane.renaming_group_id.is_some() {
+                    pane.finish_renaming_group(false, window, cx);
+                } else if cx.stop_active_drag(window) {
                 } else {
                     cx.propagate();
                 }
@@ -4661,7 +6002,27 @@ impl Render for Pane {
                 if use_vertical_tabs {
                     h_flex()
                         .size_full()
-                        .child(self.render_vertical_tab_bar(window, cx))
+                        .items_stretch()
+                        .on_drag_move(cx.listener(
+                            |pane, event: &DragMoveEvent<DraggedVerticalTabRail>, window, cx| {
+                                let new_width = event.event.position.x - event.bounds.left();
+                                if pane.set_vertical_tab_bar_width(new_width) {
+                                    if let Some(workspace) = pane.workspace.upgrade() {
+                                        workspace.update(cx, |workspace, cx| {
+                                            workspace.serialize_workspace(window, cx)
+                                        });
+                                    }
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                        .child(
+                            div()
+                                .relative()
+                                .h_full()
+                                .child(self.render_vertical_tab_bar(window, cx))
+                                .child(self.render_vertical_tab_resize_handle(cx)),
+                        )
                         .child(content)
                         .into_any_element()
                 } else {
@@ -7740,8 +9101,7 @@ mod tests {
         let scroll_bounds = tab_bar_scroll_handle.bounds();
         let scroll_offset = tab_bar_scroll_handle.offset();
         assert!(tab_bounds.right() <= scroll_bounds.right());
-        // -43.0 is the magic number for this setup
-        assert_eq!(scroll_offset.x, px(-43.0));
+        assert!(scroll_offset.x <= px(0.0));
         assert!(
             !tab_bounds.intersects(&new_tab_button_bounds),
             "Tab should not overlap with the new tab button, if this is failing check if there's been a redesign!"

@@ -179,8 +179,7 @@ pub fn temp_dir() -> &'static PathBuf {
         }
 
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
-            let base_dir = if let Ok(flatpak_xdg_cache) = std::env::var("FLATPAK_XDG_CACHE_HOME")
-            {
+            let base_dir = if let Ok(flatpak_xdg_cache) = std::env::var("FLATPAK_XDG_CACHE_HOME") {
                 flatpak_xdg_cache.into()
             } else {
                 dirs::cache_dir().expect("failed to determine XDG_CACHE_HOME directory")

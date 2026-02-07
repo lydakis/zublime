@@ -1,7 +1,7 @@
 use super::{SerializedAxis, SerializedWindowBounds};
 use crate::{
-    Member, Pane, PaneAxis, SerializableItemRegistry, Workspace, WorkspaceId, item::ItemHandle,
-    path_list::PathList,
+    Member, Pane, PaneAxis, PaneTabUiState, SerializableItemRegistry, Workspace, WorkspaceId,
+    item::ItemHandle, path_list::PathList,
 };
 use anyhow::{Context, Result};
 use async_recursion::async_recursion;
@@ -163,11 +163,40 @@ impl Default for SerializedPaneGroup {
             children: vec![SerializedItem::default()],
             active: false,
             pinned_count: 0,
+            tab_ui_state: None,
         })
     }
 }
 
 impl SerializedPaneGroup {
+    pub(crate) fn collect_group_watch_configs(&self) -> Vec<(u64, PathBuf, bool)> {
+        let mut group_configs = Vec::new();
+        self.collect_group_watch_configs_into(&mut group_configs);
+        group_configs
+    }
+
+    fn collect_group_watch_configs_into(&self, group_configs: &mut Vec<(u64, PathBuf, bool)>) {
+        match self {
+            SerializedPaneGroup::Group { children, .. } => {
+                for child in children {
+                    child.collect_group_watch_configs_into(group_configs);
+                }
+            }
+            SerializedPaneGroup::Pane(serialized_pane) => {
+                let Some(tab_ui_state) = serialized_pane
+                    .tab_ui_state
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<PaneTabUiState>(json).ok())
+                else {
+                    return;
+                };
+                for config in tab_ui_state.group_watch_configs {
+                    group_configs.push((config.group_id, config.root_path, config.paused));
+                }
+            }
+        }
+    }
+
     #[async_recursion(?Send)]
     pub(crate) async fn deserialize(
         self,
@@ -227,10 +256,11 @@ impl SerializedPaneGroup {
                     .context("Could not deserialize pane)")
                     .log_err()?;
 
-                if pane
+                let should_keep_pane = pane
                     .read_with(cx, |pane, _| pane.items_len() != 0)
                     .log_err()?
-                {
+                    || serialized_pane.has_group_watch_configs();
+                if should_keep_pane {
                     let pane = pane.upgrade()?;
                     Some((
                         Member::Pane(pane.clone()),
@@ -251,20 +281,44 @@ impl SerializedPaneGroup {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Default, Clone)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct SerializedPane {
     pub(crate) active: bool,
     pub(crate) children: Vec<SerializedItem>,
     pub(crate) pinned_count: usize,
+    pub(crate) tab_ui_state: Option<String>,
 }
 
 impl SerializedPane {
+    #[cfg(test)]
     pub fn new(children: Vec<SerializedItem>, active: bool, pinned_count: usize) -> Self {
         SerializedPane {
             children,
             active,
             pinned_count,
+            tab_ui_state: None,
         }
+    }
+
+    pub fn new_with_tab_ui_state(
+        children: Vec<SerializedItem>,
+        active: bool,
+        pinned_count: usize,
+        tab_ui_state: Option<String>,
+    ) -> Self {
+        SerializedPane {
+            children,
+            active,
+            pinned_count,
+            tab_ui_state,
+        }
+    }
+
+    pub(crate) fn has_group_watch_configs(&self) -> bool {
+        self.tab_ui_state
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<PaneTabUiState>(json).ok())
+            .is_some_and(|tab_ui_state| !tab_ui_state.group_watch_configs.is_empty())
     }
 
     pub async fn deserialize_to(
@@ -276,6 +330,7 @@ impl SerializedPane {
         cx: &mut AsyncWindowContext,
     ) -> Result<Vec<Option<Box<dyn ItemHandle>>>> {
         let mut item_tasks = Vec::new();
+        let mut restored_item_ids_by_previous_id = BTreeMap::new();
         let mut active_item_index = None;
         let mut preview_item_index = None;
         for (index, item) in self.children.iter().enumerate() {
@@ -300,8 +355,15 @@ impl SerializedPane {
         }
 
         let mut items = Vec::new();
-        for item_handle in futures::future::join_all(item_tasks).await {
+        for (index, item_handle) in futures::future::join_all(item_tasks).await.into_iter().enumerate()
+        {
             let item_handle = item_handle.log_err();
+            if let Some(item_handle) = item_handle.as_ref()
+                && let Some(serialized_item) = self.children.get(index)
+            {
+                restored_item_ids_by_previous_id
+                    .insert(serialized_item.item_id, item_handle.item_id().as_u64());
+            }
             items.push(item_handle.clone());
 
             if let Some(item_handle) = item_handle {
@@ -327,9 +389,43 @@ impl SerializedPane {
         pane.update(cx, |pane, _| {
             pane.set_pinned_count(self.pinned_count.min(items.len()));
         })?;
+        pane.update(cx, |pane, _| {
+            let mut tab_ui_state = self
+                .tab_ui_state
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<PaneTabUiState>(json).ok())
+                .unwrap_or_default();
+            remap_tab_ui_state_item_ids(&mut tab_ui_state, &restored_item_ids_by_previous_id);
+            pane.set_tab_ui_state(tab_ui_state);
+        })?;
 
         anyhow::Ok(items)
     }
+}
+
+fn remap_tab_ui_state_item_ids(
+    tab_ui_state: &mut PaneTabUiState,
+    restored_item_ids_by_previous_id: &BTreeMap<u64, u64>,
+) {
+    tab_ui_state.aliases_by_item = std::mem::take(&mut tab_ui_state.aliases_by_item)
+        .into_iter()
+        .filter_map(|(previous_item_id, alias)| {
+            restored_item_ids_by_previous_id
+                .get(&previous_item_id)
+                .copied()
+                .map(|restored_item_id| (restored_item_id, alias))
+        })
+        .collect();
+
+    tab_ui_state.memberships_by_item = std::mem::take(&mut tab_ui_state.memberships_by_item)
+        .into_iter()
+        .filter_map(|(previous_item_id, group_id)| {
+            restored_item_ids_by_previous_id
+                .get(&previous_item_id)
+                .copied()
+                .map(|restored_item_id| (restored_item_id, group_id))
+        })
+        .collect();
 }
 
 pub type GroupId = i64;

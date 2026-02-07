@@ -200,9 +200,7 @@ pub fn init(cx: &mut App) {
         CommitModal::register(workspace);
         git_panel::register(workspace);
         repository_selector::register(workspace);
-        branch_picker::register(workspace);
-        worktree_picker::register(workspace);
-        stash_picker::register(workspace);
+        git_picker::register(workspace);
         workspace.register_action(|workspace, _: &ToggleActiveFileDiff, window, cx| {
             open_active_file_diff(workspace, DiffBase::Head, window, cx);
         });

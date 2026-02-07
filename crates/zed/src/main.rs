@@ -33,6 +33,8 @@ use reqwest_client::ReqwestClient;
 
 use assets::Assets;
 use node_runtime::{NodeBinaryOptions, NodeRuntime};
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
 use project::{project_settings::ProjectSettings, trusted_worktrees};
 use proto;
@@ -57,8 +59,6 @@ use workspace::{
     AppState, PathList, SerializedWorkspaceLocation, Toast, Workspace, WorkspaceId,
     WorkspaceSettings, WorkspaceStore, notifications::NotificationId,
 };
-#[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
 use zed::{
     OpenListener, OpenRequest, RawOpenRequest, app_menus, build_window_options,
     derive_paths_with_position, edit_prediction_registry, handle_cli_connection,

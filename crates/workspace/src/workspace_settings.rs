@@ -134,7 +134,9 @@ impl Settings for TabBarSettings {
             layout: tab_bar.layout.unwrap(),
             show_nav_history_buttons: tab_bar.show_nav_history_buttons.unwrap(),
             show_tab_bar_buttons: tab_bar.show_tab_bar_buttons.unwrap(),
-            show_pinned_tabs_in_separate_row: tab_bar.show_pinned_tabs_in_separate_row.unwrap(),
+            show_pinned_tabs_in_separate_row: tab_bar
+                .show_pinned_tabs_in_separate_row
+                .unwrap_or(false),
         }
     }
 }

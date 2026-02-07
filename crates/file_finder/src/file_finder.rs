@@ -1,11 +1,7 @@
 #[cfg(test)]
 mod file_finder_tests;
-#[cfg(test)]
-mod open_path_prompt_tests;
 
 mod directory_browser;
-pub mod file_finder_settings;
-mod open_path_prompt;
 
 pub use directory_browser::Toggle as ToggleDirectoryBrowser;
 

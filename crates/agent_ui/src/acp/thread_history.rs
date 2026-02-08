@@ -18,6 +18,7 @@ use ui::{
 };
 
 const DEFAULT_TITLE: &SharedString = &SharedString::new_static("New Thread");
+const CHAT_TAB_TITLE_PREFIX: &str = "[Chat] ";
 
 fn thread_title(entry: &AgentSessionInfo) -> &SharedString {
     entry
@@ -39,9 +40,24 @@ fn is_chat_tab_entry(entry: &AgentSessionInfo) -> bool {
 fn display_thread_title(entry: &AgentSessionInfo) -> SharedString {
     let title = thread_title(entry);
     if is_chat_tab_entry(entry) {
-        format!("[Chat] {}", title).into()
+        format!("{CHAT_TAB_TITLE_PREFIX}{title}").into()
     } else {
         title.clone()
+    }
+}
+
+fn display_highlight_positions(
+    entry: &AgentSessionInfo,
+    highlight_positions: Vec<usize>,
+) -> Vec<usize> {
+    if is_chat_tab_entry(entry) {
+        let prefix_len = CHAT_TAB_TITLE_PREFIX.chars().count();
+        highlight_positions
+            .into_iter()
+            .map(|position| position + prefix_len)
+            .collect()
+    } else {
+        highlight_positions
     }
 }
 
@@ -638,6 +654,7 @@ impl AcpThreadHistory {
     ) -> AnyElement {
         let selected = ix == self.selected_index;
         let hovered = Some(ix) == self.hovered_index;
+        let highlight_positions = display_highlight_positions(entry, highlight_positions);
         let entry_time = entry.updated_at;
         let display_text = match (format, entry_time) {
             (EntryTimeFormat::DateAndTime, Some(entry_time)) => {

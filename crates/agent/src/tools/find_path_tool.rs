@@ -1,8 +1,8 @@
-use crate::{AgentTool, ToolCallEventStream};
+use crate::{AgentTool, DbThreadKind, Thread, ToolCallEventStream};
 use agent_client_protocol as acp;
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
-use gpui::{App, AppContext, Entity, SharedString, Task};
+use gpui::{App, AppContext, Entity, SharedString, Task, WeakEntity};
 use language_model::LanguageModelToolResultContent;
 use project::Project;
 use schemars::JsonSchema;
@@ -73,12 +73,30 @@ impl From<FindPathToolOutput> for LanguageModelToolResultContent {
 const RESULTS_PER_PAGE: usize = 50;
 
 pub struct FindPathTool {
+    thread: Option<WeakEntity<Thread>>,
     project: Entity<Project>,
 }
 
 impl FindPathTool {
     pub fn new(project: Entity<Project>) -> Self {
-        Self { project }
+        Self {
+            thread: None,
+            project,
+        }
+    }
+
+    pub fn new_with_thread(thread: WeakEntity<Thread>, project: Entity<Project>) -> Self {
+        Self {
+            thread: Some(thread),
+            project,
+        }
+    }
+
+    pub fn with_thread(&self, new_thread: WeakEntity<Thread>) -> Self {
+        Self {
+            thread: Some(new_thread),
+            project: self.project.clone(),
+        }
     }
 }
 
@@ -111,14 +129,37 @@ impl AgentTool for FindPathTool {
         cx: &mut App,
     ) -> Task<Result<FindPathToolOutput>> {
         let search_paths_task = search_paths(&input.glob, self.project.clone(), cx);
+        let scoped_cwd = self
+            .thread
+            .as_ref()
+            .and_then(|thread| {
+                thread
+                    .read_with(cx, |thread, _| {
+                        if thread.kind() == DbThreadKind::ChatTab {
+                            thread.cwd().cloned()
+                        } else {
+                            None
+                        }
+                    })
+                    .ok()
+            })
+            .flatten();
 
         cx.background_spawn(async move {
-            let matches = futures::select! {
+            let all_matches = futures::select! {
                 result = search_paths_task.fuse() => result?,
                 _ = event_stream.cancelled_by_user().fuse() => {
                     anyhow::bail!("Path search cancelled by user");
                 }
             };
+            let matches: Vec<PathBuf> = all_matches
+                .into_iter()
+                .filter(|path| {
+                    scoped_cwd
+                        .as_ref()
+                        .is_none_or(|scope| path.starts_with(scope))
+                })
+                .collect();
             let paginated_matches: &[PathBuf] = &matches[cmp::min(input.offset, matches.len())
                 ..cmp::min(input.offset + RESULTS_PER_PAGE, matches.len())];
 
@@ -152,6 +193,15 @@ impl AgentTool for FindPathTool {
                 all_matches_len: matches.len(),
             })
         })
+    }
+
+    fn rebind_thread(
+        &self,
+        new_thread: gpui::WeakEntity<crate::Thread>,
+    ) -> Option<Arc<dyn crate::AnyAgentTool>> {
+        self.thread
+            .as_ref()
+            .map(|_| self.with_thread(new_thread).erase())
     }
 }
 

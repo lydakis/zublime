@@ -127,6 +127,16 @@ impl AgentTool for ReadFileTool {
                 &input.path
             )));
         };
+        if !self
+            .thread
+            .read_with(cx, |thread, _| thread.is_path_allowed(&abs_path))
+            .unwrap_or(true)
+        {
+            return Task::ready(Err(anyhow!(
+                "Cannot read file because it is outside this chat scope: {}",
+                &input.path
+            )));
+        }
 
         // Error out if this path is either excluded or private in global settings
         let global_settings = WorktreeSettings::get_global(cx);

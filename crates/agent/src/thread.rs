@@ -1,6 +1,6 @@
 use crate::{
     ContextServerRegistry, CopyPathTool, CreateDirectoryTool, DbLanguageModel, DbThread,
-    DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, GrepTool,
+    DbThreadKind, DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, GrepTool,
     ListDirectoryTool, MovePathTool, NowTool, OpenTool, ProjectSnapshot, ReadFileTool,
     RestoreFileFromDiskTool, SaveFileTool, StreamingEditFileTool, SubagentTool,
     SystemPromptTemplate, Template, Templates, TerminalTool, ThinkingTool, ToolPermissionDecision,
@@ -805,6 +805,8 @@ pub struct Thread {
     pub(crate) file_read_times: HashMap<PathBuf, fs::MTime>,
     /// True if this thread was imported from a shared thread and can be synced.
     imported: bool,
+    cwd: Option<PathBuf>,
+    kind: DbThreadKind,
     /// If this is a subagent thread, contains context about the parent
     subagent_context: Option<SubagentContext>,
     /// Weak references to running subagent threads for cancellation propagation
@@ -871,6 +873,8 @@ impl Thread {
             action_log,
             file_read_times: HashMap::default(),
             imported: false,
+            cwd: None,
+            kind: DbThreadKind::Standard,
             subagent_context: None,
             running_subagents: Vec::new(),
         }
@@ -938,6 +942,8 @@ impl Thread {
             action_log,
             file_read_times: HashMap::default(),
             imported: false,
+            cwd: None,
+            kind: DbThreadKind::Standard,
             subagent_context: Some(subagent_context),
             running_subagents: Vec::new(),
         }
@@ -950,6 +956,52 @@ impl Thread {
     /// Returns true if this thread was imported from a shared thread.
     pub fn is_imported(&self) -> bool {
         self.imported
+    }
+
+    pub fn kind(&self) -> DbThreadKind {
+        self.kind
+    }
+
+    pub fn cwd(&self) -> Option<&PathBuf> {
+        self.cwd.as_ref()
+    }
+
+    pub fn set_cwd(&mut self, cwd: Option<PathBuf>, cx: &mut Context<Self>) {
+        if self.cwd == cwd {
+            return;
+        }
+        self.cwd = cwd;
+        cx.notify();
+    }
+
+    pub fn set_kind_and_cwd(
+        &mut self,
+        kind: DbThreadKind,
+        cwd: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.kind == kind && self.cwd == cwd {
+            return;
+        }
+        self.kind = kind;
+        self.cwd = cwd;
+        cx.notify();
+    }
+
+    pub fn set_chat_tab_scope(&mut self, cwd: PathBuf, cx: &mut Context<Self>) {
+        self.kind = DbThreadKind::ChatTab;
+        self.cwd = Some(cwd);
+        cx.notify();
+    }
+
+    pub fn is_path_allowed(&self, path: &Path) -> bool {
+        if self.kind != DbThreadKind::ChatTab {
+            return true;
+        }
+
+        self.cwd
+            .as_ref()
+            .is_none_or(|scope_root| path.starts_with(scope_root))
     }
 
     pub fn replay(
@@ -1143,6 +1195,8 @@ impl Thread {
             prompt_capabilities_rx,
             file_read_times: HashMap::default(),
             imported: db_thread.imported,
+            cwd: db_thread.cwd,
+            kind: db_thread.kind,
             subagent_context: None,
             running_subagents: Vec::new(),
         }
@@ -1164,6 +1218,8 @@ impl Thread {
             }),
             profile: Some(self.profile_id.clone()),
             imported: self.imported,
+            cwd: self.cwd.clone(),
+            kind: self.kind,
         };
 
         cx.background_spawn(async move {
@@ -1277,12 +1333,24 @@ impl Thread {
             Templates::new(),
         ));
         self.add_tool(FetchTool::new(self.project.read(cx).client().http_client()));
-        self.add_tool(FindPathTool::new(self.project.clone()));
-        self.add_tool(GrepTool::new(self.project.clone()));
-        self.add_tool(ListDirectoryTool::new(self.project.clone()));
+        self.add_tool(FindPathTool::new_with_thread(
+            cx.weak_entity(),
+            self.project.clone(),
+        ));
+        self.add_tool(GrepTool::new_with_thread(
+            cx.weak_entity(),
+            self.project.clone(),
+        ));
+        self.add_tool(ListDirectoryTool::new_with_thread(
+            cx.weak_entity(),
+            self.project.clone(),
+        ));
         self.add_tool(MovePathTool::new(self.project.clone()));
         self.add_tool(NowTool);
-        self.add_tool(OpenTool::new(self.project.clone()));
+        self.add_tool(OpenTool::new_with_thread(
+            cx.weak_entity(),
+            self.project.clone(),
+        ));
         self.add_tool(ReadFileTool::new(
             cx.weak_entity(),
             self.project.clone(),
@@ -2380,6 +2448,24 @@ impl Thread {
                 }
             })
             .collect::<BTreeMap<_, _>>();
+
+        if self.kind == DbThreadKind::ChatTab {
+            tools.retain(|name, _| {
+                matches!(
+                    name.as_ref(),
+                    ReadFileTool::NAME
+                        | ListDirectoryTool::NAME
+                        | FindPathTool::NAME
+                        | GrepTool::NAME
+                        | FetchTool::NAME
+                        | WebSearchTool::NAME
+                        | ThinkingTool::NAME
+                        | NowTool::NAME
+                        | OpenTool::NAME
+                )
+            });
+            return tools;
+        }
 
         let mut context_server_tools = Vec::new();
         let mut seen_tools = tools.keys().cloned().collect::<HashSet<_>>();

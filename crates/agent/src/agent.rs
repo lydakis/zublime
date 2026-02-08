@@ -53,6 +53,9 @@ use std::sync::Arc;
 use util::ResultExt;
 use util::rel_path::RelPath;
 
+pub const SESSION_META_THREAD_KIND_KEY: &str = "zed_thread_kind";
+pub const SESSION_META_THREAD_KIND_CHAT_TAB: &str = "chat_tab";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProjectSnapshot {
     pub worktree_snapshots: Vec<project::telemetry_snapshot::TelemetryWorktreeSnapshot>,
@@ -309,6 +312,7 @@ impl NativeAgent {
     fn new_session(
         &mut self,
         project: Entity<Project>,
+        cwd: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Entity<AcpThread> {
         // Create Thread
@@ -331,6 +335,9 @@ impl NativeAgent {
                 default_model,
                 cx,
             )
+        });
+        thread.update(cx, |thread, cx| {
+            thread.set_cwd(cwd.clone(), cx);
         });
 
         self.register_session(thread, cx)
@@ -1229,9 +1236,9 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
         cx: &mut App,
     ) -> Task<Result<Entity<acp_thread::AcpThread>>> {
         log::debug!("Creating new thread for project at: {cwd:?}");
-        Task::ready(Ok(self
-            .0
-            .update(cx, |agent, cx| agent.new_session(project, cx))))
+        Task::ready(Ok(self.0.update(cx, |agent, cx| {
+            agent.new_session(project, Some(cwd.to_path_buf()), cx)
+        })))
     }
 
     fn supports_load_session(&self, _cx: &App) -> bool {
@@ -1436,12 +1443,18 @@ impl NativeAgentSessionList {
     }
 
     fn to_session_info(entry: DbThreadMetadata) -> AgentSessionInfo {
+        let meta = (entry.kind == DbThreadKind::ChatTab).then(|| {
+            acp::Meta::from_iter([(
+                SESSION_META_THREAD_KIND_KEY.into(),
+                SESSION_META_THREAD_KIND_CHAT_TAB.into(),
+            )])
+        });
         AgentSessionInfo {
             session_id: entry.id,
-            cwd: None,
+            cwd: entry.cwd,
             title: Some(entry.title),
             updated_at: Some(entry.updated_at),
-            meta: None,
+            meta,
         }
     }
 

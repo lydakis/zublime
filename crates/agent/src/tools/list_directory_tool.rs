@@ -1,12 +1,13 @@
-use crate::{AgentTool, ToolCallEventStream};
+use crate::{AgentTool, DbThreadKind, Thread, ToolCallEventStream};
 use agent_client_protocol::ToolKind;
 use anyhow::{Result, anyhow};
-use gpui::{App, Entity, SharedString, Task};
+use gpui::{App, Entity, SharedString, Task, WeakEntity};
 use project::{Project, ProjectPath, WorktreeSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::Settings;
 use std::fmt::Write;
+use std::path::Path;
 use std::sync::Arc;
 use util::markdown::MarkdownInlineCode;
 
@@ -38,12 +39,58 @@ pub struct ListDirectoryToolInput {
 }
 
 pub struct ListDirectoryTool {
+    thread: Option<WeakEntity<Thread>>,
     project: Entity<Project>,
 }
 
 impl ListDirectoryTool {
     pub fn new(project: Entity<Project>) -> Self {
-        Self { project }
+        Self {
+            thread: None,
+            project,
+        }
+    }
+
+    pub fn new_with_thread(thread: WeakEntity<Thread>, project: Entity<Project>) -> Self {
+        Self {
+            thread: Some(thread),
+            project,
+        }
+    }
+
+    pub fn with_thread(&self, new_thread: WeakEntity<Thread>) -> Self {
+        Self {
+            thread: Some(new_thread),
+            project: self.project.clone(),
+        }
+    }
+
+    fn is_path_allowed(&self, path: &Path, cx: &App) -> bool {
+        self.thread
+            .as_ref()
+            .and_then(|thread| {
+                thread
+                    .read_with(cx, |thread, _| thread.is_path_allowed(path))
+                    .ok()
+            })
+            .unwrap_or(true)
+    }
+
+    fn thread_cwd(&self, cx: &App) -> Option<std::path::PathBuf> {
+        self.thread
+            .as_ref()
+            .and_then(|thread| {
+                thread
+                    .read_with(cx, |thread, _| {
+                        if thread.kind() == DbThreadKind::ChatTab {
+                            thread.cwd().cloned()
+                        } else {
+                            None
+                        }
+                    })
+                    .ok()
+            })
+            .flatten()
     }
 }
 
@@ -79,6 +126,16 @@ impl AgentTool for ListDirectoryTool {
         // Sometimes models will return these even though we tell it to give a path and not a glob.
         // When this happens, just list the root worktree directories.
         if matches!(input.path.as_str(), "." | "" | "./" | "*") {
+            if let Some(scope) = self.thread_cwd(cx)
+                && let Some(project_path) = self.project.read(cx).find_project_path(&scope, cx)
+                && let Some(short_path) = self
+                    .project
+                    .read(cx)
+                    .short_full_path_for_project_path(&project_path, cx)
+            {
+                return Task::ready(Ok(short_path));
+            }
+
             let output = self
                 .project
                 .read(cx)
@@ -86,7 +143,7 @@ impl AgentTool for ListDirectoryTool {
                 .filter_map(|worktree| {
                     let worktree = worktree.read(cx);
                     let root_entry = worktree.root_entry()?;
-                    if root_entry.is_dir() {
+                    if root_entry.is_dir() && self.is_path_allowed(&worktree.abs_path(), cx) {
                         Some(root_entry.path.display(worktree.path_style()))
                     } else {
                         None
@@ -101,6 +158,18 @@ impl AgentTool for ListDirectoryTool {
         let Some(project_path) = self.project.read(cx).find_project_path(&input.path, cx) else {
             return Task::ready(Err(anyhow!("Path {} not found in project", input.path)));
         };
+        let Some(abs_path) = self.project.read(cx).absolute_path(&project_path, cx) else {
+            return Task::ready(Err(anyhow!(
+                "Failed to convert {} to absolute path",
+                input.path
+            )));
+        };
+        if !self.is_path_allowed(&abs_path, cx) {
+            return Task::ready(Err(anyhow!(
+                "Cannot list directory because it is outside this chat scope: {}",
+                input.path
+            )));
+        }
         let Some(worktree) = self
             .project
             .read(cx)
@@ -156,6 +225,11 @@ impl AgentTool for ListDirectoryTool {
         let mut files = Vec::new();
 
         for entry in worktree_snapshot.child_entries(&project_path.path) {
+            let entry_abs_path = worktree_snapshot.absolutize(&entry.path);
+            if !self.is_path_allowed(&entry_abs_path, cx) {
+                continue;
+            }
+
             // Skip private and excluded files and directories
             if global_settings.is_path_private(&entry.path)
                 || global_settings.is_path_excluded(&entry.path)
@@ -196,6 +270,15 @@ impl AgentTool for ListDirectoryTool {
         }
 
         Task::ready(Ok(output))
+    }
+
+    fn rebind_thread(
+        &self,
+        new_thread: gpui::WeakEntity<crate::Thread>,
+    ) -> Option<Arc<dyn crate::AnyAgentTool>> {
+        self.thread
+            .as_ref()
+            .map(|_| self.with_thread(new_thread).erase())
     }
 }
 

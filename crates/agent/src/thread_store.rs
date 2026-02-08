@@ -156,6 +156,8 @@ mod tests {
             model: None,
             profile: None,
             imported: false,
+            cwd: None,
+            kind: crate::DbThreadKind::Standard,
         }
     }
 

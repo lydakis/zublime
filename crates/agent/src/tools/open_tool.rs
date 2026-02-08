@@ -1,8 +1,8 @@
-use crate::AgentTool;
+use crate::{AgentTool, Thread};
 use agent_client_protocol::ToolKind;
 use anyhow::{Context as _, Result};
 use futures::FutureExt as _;
-use gpui::{App, AppContext, Entity, SharedString, Task};
+use gpui::{App, AppContext, Entity, SharedString, Task, WeakEntity};
 use project::Project;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,12 +25,30 @@ pub struct OpenToolInput {
 }
 
 pub struct OpenTool {
+    thread: Option<WeakEntity<Thread>>,
     project: Entity<Project>,
 }
 
 impl OpenTool {
     pub fn new(project: Entity<Project>) -> Self {
-        Self { project }
+        Self {
+            thread: None,
+            project,
+        }
+    }
+
+    pub fn new_with_thread(thread: WeakEntity<Thread>, project: Entity<Project>) -> Self {
+        Self {
+            thread: Some(thread),
+            project,
+        }
+    }
+
+    pub fn with_thread(&self, new_thread: WeakEntity<Thread>) -> Self {
+        Self {
+            thread: Some(new_thread),
+            project: self.project.clone(),
+        }
     }
 }
 
@@ -64,6 +82,22 @@ impl AgentTool for OpenTool {
     ) -> Task<Result<Self::Output>> {
         // If path_or_url turns out to be a path in the project, make it absolute.
         let abs_path = to_absolute_path(&input.path_or_url, self.project.clone(), cx);
+        if let Some(abs_path) = abs_path.as_ref()
+            && self
+                .thread
+                .as_ref()
+                .and_then(|thread| {
+                    thread
+                        .read_with(cx, |thread, _| thread.is_path_allowed(abs_path))
+                        .ok()
+                })
+                .is_some_and(|allowed| !allowed)
+        {
+            return Task::ready(Err(anyhow::anyhow!(
+                "Cannot open this path because it is outside this chat scope: {}",
+                input.path_or_url
+            )));
+        }
         let context = crate::ToolPermissionContext {
             tool_name: Self::NAME.to_string(),
             input_value: input.path_or_url.clone(),
@@ -86,6 +120,15 @@ impl AgentTool for OpenTool {
 
             Ok(format!("Successfully opened {}", input.path_or_url))
         })
+    }
+
+    fn rebind_thread(
+        &self,
+        new_thread: gpui::WeakEntity<crate::Thread>,
+    ) -> Option<Arc<dyn crate::AnyAgentTool>> {
+        self.thread
+            .as_ref()
+            .map(|_| self.with_thread(new_thread).erase())
     }
 }
 

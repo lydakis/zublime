@@ -1,8 +1,8 @@
-use crate::{AgentTool, ToolCallEventStream};
+use crate::{AgentTool, DbThreadKind, Thread, ToolCallEventStream};
 use agent_client_protocol as acp;
 use anyhow::{Result, anyhow};
 use futures::{FutureExt as _, StreamExt};
-use gpui::{App, Entity, SharedString, Task};
+use gpui::{App, Entity, SharedString, Task, WeakEntity};
 use language::{OffsetRangeExt, ParseStatus, Point};
 use project::{
     Project, SearchResults, WorktreeSettings,
@@ -67,12 +67,30 @@ impl GrepToolInput {
 const RESULTS_PER_PAGE: u32 = 20;
 
 pub struct GrepTool {
+    thread: Option<WeakEntity<Thread>>,
     project: Entity<Project>,
 }
 
 impl GrepTool {
     pub fn new(project: Entity<Project>) -> Self {
-        Self { project }
+        Self {
+            thread: None,
+            project,
+        }
+    }
+
+    pub fn new_with_thread(thread: WeakEntity<Thread>, project: Entity<Project>) -> Self {
+        Self {
+            thread: Some(thread),
+            project,
+        }
+    }
+
+    pub fn with_thread(&self, new_thread: WeakEntity<Thread>) -> Self {
+        Self {
+            thread: Some(new_thread),
+            project: self.project.clone(),
+        }
     }
 }
 
@@ -171,6 +189,21 @@ impl AgentTool for GrepTool {
         let results = self
             .project
             .update(cx, |project, cx| project.search(query, cx));
+        let scoped_cwd = self
+            .thread
+            .as_ref()
+            .and_then(|thread| {
+                thread
+                    .read_with(cx, |thread, _| {
+                        if thread.kind() == DbThreadKind::ChatTab {
+                            thread.cwd().cloned()
+                        } else {
+                            None
+                        }
+                    })
+                    .ok()
+            })
+            .flatten();
 
         let project = self.project.downgrade();
         cx.spawn(async move |cx|  {
@@ -203,6 +236,12 @@ impl AgentTool for GrepTool {
                 }) else {
                     continue;
                 };
+                if scoped_cwd
+                    .as_ref()
+                    .is_some_and(|scope_root| !path.starts_with(scope_root))
+                {
+                    continue;
+                }
 
                 // Check if this file should be excluded based on its worktree settings
                 if let Ok(Some(project_path)) = project.read_with(cx, |project, cx| {
@@ -324,6 +363,15 @@ impl AgentTool for GrepTool {
                 Ok(format!("Found {matches_found} matches:\n{output}"))
             }
         })
+    }
+
+    fn rebind_thread(
+        &self,
+        new_thread: gpui::WeakEntity<crate::Thread>,
+    ) -> Option<Arc<dyn crate::AnyAgentTool>> {
+        self.thread
+            .as_ref()
+            .map(|_| self.with_thread(new_thread).erase())
     }
 }
 
@@ -781,7 +829,7 @@ mod tests {
         project: Entity<Project>,
         cx: &mut TestAppContext,
     ) -> String {
-        let tool = Arc::new(GrepTool { project });
+        let tool = Arc::new(GrepTool::new(project));
         let task = cx.update(|cx| tool.run(input, ToolCallEventStream::test().0, cx));
 
         match task.await {

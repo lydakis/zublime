@@ -189,6 +189,8 @@ impl AgentTool for SubagentTool {
         let context_server_registry = parent_thread.context_server_registry.clone();
         let templates = parent_thread.templates.clone();
         let parent_tools = parent_thread.tools.clone();
+        let parent_kind = parent_thread.kind();
+        let parent_cwd = parent_thread.cwd().cloned();
         let current_depth = self.current_depth;
         let parent_thread_weak = self.parent_thread.clone();
 
@@ -225,6 +227,9 @@ impl AgentTool for SubagentTool {
                     subagent_tools,
                     cx,
                 )
+            });
+            subagent_thread.update(cx, |thread, cx| {
+                thread.set_kind_and_cwd(parent_kind, parent_cwd.clone(), cx);
             });
 
             let subagent_weak = subagent_thread.downgrade();

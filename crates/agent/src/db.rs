@@ -15,6 +15,7 @@ use sqlez::{
     connection::Connection,
     statement::Statement,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 use ui::{App, SharedString};
 use zed_env_vars::ZED_STATELESS;
@@ -29,6 +30,17 @@ pub struct DbThreadMetadata {
     #[serde(alias = "summary")]
     pub title: SharedString,
     pub updated_at: DateTime<Utc>,
+    pub cwd: Option<PathBuf>,
+    #[serde(default)]
+    pub kind: DbThreadKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DbThreadKind {
+    #[default]
+    Standard,
+    ChatTab,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,6 +62,10 @@ pub struct DbThread {
     pub profile: Option<AgentProfileId>,
     #[serde(default)]
     pub imported: bool,
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
+    #[serde(default)]
+    pub kind: DbThreadKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +103,8 @@ impl SharedThread {
             model: self.model,
             profile: None,
             imported: true,
+            cwd: None,
+            kind: DbThreadKind::Standard,
         }
     }
 
@@ -260,6 +278,8 @@ impl DbThread {
             model: thread.model,
             profile: thread.profile,
             imported: false,
+            cwd: None,
+            kind: DbThreadKind::Standard,
         })
     }
 }
@@ -407,19 +427,42 @@ impl ThreadsDatabase {
         self.executor.spawn(async move {
             let connection = connection.lock();
 
-            let mut select =
-                connection.select_bound::<(), (Arc<str>, String, String)>(indoc! {"
-                SELECT id, summary, updated_at FROM threads ORDER BY updated_at DESC
+            let mut select = connection
+                .select_bound::<(), (Arc<str>, String, String, DataType, Vec<u8>)>(indoc! {"
+                SELECT id, summary, updated_at, data_type, data FROM threads ORDER BY updated_at DESC
             "})?;
 
             let rows = select(())?;
             let mut threads = Vec::new();
 
-            for (id, summary, updated_at) in rows {
+            for (id, summary, updated_at, data_type, data) in rows {
+                let (cwd, kind) = match data_type {
+                    DataType::Zstd => {
+                        let parsed = zstd::decode_all(&data[..])
+                            .ok()
+                            .and_then(|decompressed| DbThread::from_json(&decompressed).ok());
+                        let cwd = parsed.as_ref().and_then(|thread| thread.cwd.clone());
+                        let kind = parsed
+                            .map(|thread| thread.kind)
+                            .unwrap_or(DbThreadKind::Standard);
+                        (cwd, kind)
+                    }
+                    DataType::Json => {
+                        let parsed = DbThread::from_json(&data).ok();
+                        let cwd = parsed.as_ref().and_then(|thread| thread.cwd.clone());
+                        let kind = parsed
+                            .map(|thread| thread.kind)
+                            .unwrap_or(DbThreadKind::Standard);
+                        (cwd, kind)
+                    }
+                };
+
                 threads.push(DbThreadMetadata {
                     id: acp::SessionId::new(id),
                     title: summary.into(),
                     updated_at: DateTime::parse_from_rfc3339(&updated_at)?.with_timezone(&Utc),
+                    cwd,
+                    kind,
                 });
             }
 
@@ -552,6 +595,8 @@ mod tests {
             model: None,
             profile: None,
             imported: false,
+            cwd: None,
+            kind: DbThreadKind::Standard,
         }
     }
 

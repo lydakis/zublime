@@ -5,10 +5,12 @@ mod mode_selector;
 mod model_selector;
 mod model_selector_popover;
 mod thread_history;
+mod thread_tab_item;
 mod thread_view;
 
 pub use mode_selector::ModeSelector;
 pub use model_selector::AcpModelSelector;
 pub use model_selector_popover::AcpModelSelectorPopover;
 pub use thread_history::*;
-pub use thread_view::AcpServerView;
+pub use thread_tab_item::AcpThreadTabItem;
+pub use thread_view::{AcpServerView, NativeThreadSetup};

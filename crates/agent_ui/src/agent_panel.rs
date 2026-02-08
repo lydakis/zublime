@@ -18,10 +18,10 @@ use crate::ManageProfiles;
 use crate::ui::{AcpOnboardingModal, ClaudeCodeOnboardingModal};
 use crate::{
     AddContextServer, AgentDiffPane, CopyThreadToClipboard, Follow, InlineAssistant,
-    LoadThreadFromClipboard, NewTextThread, NewThread, OpenActiveThreadAsMarkdown, OpenAgentDiff,
-    OpenHistory, ResetTrialEndUpsell, ResetTrialUpsell, ToggleNavigationMenu, ToggleNewThreadMenu,
-    ToggleOptionsMenu,
-    acp::AcpServerView,
+    LoadThreadFromClipboard, NewChatTab, NewTextThread, NewThread, OpenActiveThreadAsMarkdown,
+    OpenAgentDiff, OpenHistory, ResetTrialEndUpsell, ResetTrialUpsell, ToggleNavigationMenu,
+    ToggleNewThreadMenu, ToggleOptionsMenu,
+    acp::{AcpServerView, AcpThreadTabItem, NativeThreadSetup},
     agent_configuration::{AgentConfiguration, AssistantConfigurationEvent},
     slash_command::SlashCommandCompletionProvider,
     text_thread_editor::{AgentPanelDelegate, TextThreadEditor, make_lsp_adapter_delegate},
@@ -53,7 +53,7 @@ use gpui::{
     Subscription, Task, UpdateGlobal, WeakEntity, prelude::*, pulsating_between,
 };
 use language::LanguageRegistry;
-use language_model::{ConfigurationError, LanguageModelRegistry};
+use language_model::{ConfigurationError, LanguageModelProviderId, LanguageModelRegistry};
 use project::{Project, ProjectPath, Worktree};
 use prompt_store::{PromptBuilder, PromptStore, UserPromptId};
 use rules_library::{RulesLibrary, open_rules_library};
@@ -66,7 +66,7 @@ use ui::{
 };
 use util::ResultExt as _;
 use workspace::{
-    CollaboratorId, DraggedSelection, DraggedTab, ToggleZoom, ToolbarItemView, Workspace,
+    CollaboratorId, DraggedSelection, DraggedTab, Toast, ToggleZoom, ToolbarItemView, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
 };
 use zed_actions::{
@@ -80,6 +80,8 @@ use zed_actions::{
 const AGENT_PANEL_KEY: &str = "agent_panel";
 const RECENTLY_UPDATED_MENU_LIMIT: usize = 6;
 const DEFAULT_THREAD_TITLE: &str = "New Thread";
+const OPEN_ROUTER_PROVIDER_ID: &str = "openrouter";
+const BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SerializedAgentPanel {
@@ -95,6 +97,11 @@ pub fn init(cx: &mut App) {
                     if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
                         panel.update(cx, |panel, cx| panel.new_thread(action, window, cx));
                         workspace.focus_panel::<AgentPanel>(window, cx);
+                    }
+                })
+                .register_action(|workspace, _: &NewChatTab, window, cx| {
+                    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                        panel.update(cx, |panel, cx| panel.open_chat_tab(window, cx));
                     }
                 })
                 .register_action(
@@ -745,6 +752,119 @@ impl AgentPanel {
 
     fn new_thread(&mut self, _action: &NewThread, window: &mut Window, cx: &mut Context<Self>) {
         self.new_agent_thread(AgentType::NativeAgent, window, cx);
+    }
+
+    fn chat_tab_cwd(&self, cx: &mut Context<Self>) -> Option<std::path::PathBuf> {
+        if let Some(project_path) = self
+            .workspace
+            .update(cx, |workspace, cx| {
+                workspace
+                    .active_item(cx)
+                    .and_then(|item| item.project_path(cx))
+            })
+            .ok()
+            .flatten()
+            && let Some(abs_path) = self.project.read(cx).absolute_path(&project_path, cx)
+        {
+            let entry_is_directory = self
+                .project
+                .read(cx)
+                .entry_for_path(&project_path, cx)
+                .is_some_and(|entry| entry.is_dir());
+            if entry_is_directory {
+                return Some(abs_path);
+            }
+            if let Some(parent) = abs_path.parent() {
+                return Some(parent.to_path_buf());
+            }
+        }
+
+        let mut worktrees = self
+            .project
+            .read(cx)
+            .visible_worktrees(cx)
+            .collect::<Vec<_>>();
+        worktrees.sort_by(|left, right| {
+            left.read(cx)
+                .is_single_file()
+                .cmp(&right.read(cx).is_single_file())
+        });
+        worktrees
+            .into_iter()
+            .filter_map(|worktree| {
+                if worktree.read(cx).is_single_file() {
+                    worktree
+                        .read(cx)
+                        .abs_path()
+                        .parent()
+                        .map(|path| path.to_path_buf())
+                } else {
+                    Some(worktree.read(cx).abs_path().to_path_buf())
+                }
+            })
+            .next()
+            .or_else(|| Some(paths::home_dir().to_path_buf()))
+    }
+
+    fn has_preferred_chat_model(&self, cx: &App) -> bool {
+        let registry = LanguageModelRegistry::read_global(cx);
+        [OPEN_ROUTER_PROVIDER_ID, BEDROCK_PROVIDER_ID]
+            .into_iter()
+            .filter_map(|provider_id| registry.provider(&LanguageModelProviderId::new(provider_id)))
+            .any(|provider| {
+                provider.is_authenticated(cx)
+                    && (provider.default_model(cx).is_some()
+                        || provider.default_fast_model(cx).is_some()
+                        || !provider.provided_models(cx).is_empty())
+            })
+    }
+
+    fn open_chat_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let cwd = self.chat_tab_cwd(cx);
+        let server: Rc<dyn AgentServer> = Rc::new(agent::NativeAgentServer::new(
+            self.fs.clone(),
+            self.thread_store.clone(),
+        ));
+        let thread_view = cx.new(|cx| {
+            AcpServerView::new(
+                server,
+                None,
+                None,
+                Some(NativeThreadSetup::chat_tab(cwd.clone())),
+                self.workspace.clone(),
+                self.project.clone(),
+                Some(self.thread_store.clone()),
+                self.prompt_store.clone(),
+                self.acp_history.clone(),
+                window,
+                cx,
+            )
+        });
+        let show_provider_warning = !self.has_preferred_chat_model(cx);
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.add_item_to_active_pane(
+                Box::new(cx.new(|_| AcpThreadTabItem(thread_view.clone()))),
+                None,
+                true,
+                window,
+                cx,
+            );
+            if show_provider_warning {
+                struct ChatTabModelWarning;
+                workspace.show_toast(
+                    Toast::new(
+                        workspace::notifications::NotificationId::unique::<ChatTabModelWarning>(),
+                        "Chat Tab works best with OpenRouter or Amazon Bedrock models",
+                    )
+                    .autohide(),
+                    cx,
+                );
+            }
+        });
     }
 
     fn new_native_agent_thread_from_summary(
@@ -1675,10 +1795,75 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if thread
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get(agent::SESSION_META_THREAD_KIND_KEY))
+            .and_then(|value| value.as_str())
+            == Some(agent::SESSION_META_THREAD_KIND_CHAT_TAB)
+        {
+            self.open_chat_tab_for_session(thread, window, cx);
+            return;
+        }
+
         let Some(agent) = self.selected_external_agent() else {
             return;
         };
         self.external_thread(Some(agent), Some(thread), None, window, cx);
+    }
+
+    fn open_chat_tab_for_session(
+        &mut self,
+        thread: AgentSessionInfo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+
+        let setup = Some(NativeThreadSetup::chat_tab(thread.cwd.clone()));
+        let server: Rc<dyn AgentServer> = Rc::new(agent::NativeAgentServer::new(
+            self.fs.clone(),
+            self.thread_store.clone(),
+        ));
+        let thread_view = cx.new(|cx| {
+            AcpServerView::new(
+                server,
+                Some(thread),
+                None,
+                setup,
+                self.workspace.clone(),
+                self.project.clone(),
+                Some(self.thread_store.clone()),
+                self.prompt_store.clone(),
+                self.acp_history.clone(),
+                window,
+                cx,
+            )
+        });
+        let show_provider_warning = !self.has_preferred_chat_model(cx);
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.add_item_to_active_pane(
+                Box::new(cx.new(|_| AcpThreadTabItem(thread_view.clone()))),
+                None,
+                true,
+                window,
+                cx,
+            );
+            if show_provider_warning {
+                struct ChatTabModelWarning;
+                workspace.show_toast(
+                    Toast::new(
+                        workspace::notifications::NotificationId::unique::<ChatTabModelWarning>(),
+                        "Chat Tab works best with OpenRouter or Amazon Bedrock models",
+                    )
+                    .autohide(),
+                    cx,
+                );
+            }
+        });
     }
 
     fn _external_thread(
@@ -1708,6 +1893,7 @@ impl AgentPanel {
                 server,
                 resume_thread,
                 initial_content,
+                None,
                 workspace.clone(),
                 project,
                 thread_store,
@@ -2283,6 +2469,28 @@ impl AgentPanel {
                                                                 window,
                                                                 cx,
                                                             );
+                                                        });
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    }),
+                            )
+                            .item(
+                                ContextMenuEntry::new("Chat Tab")
+                                    .action(NewChatTab.boxed_clone())
+                                    .icon(IconName::ZedAgent)
+                                    .icon_color(Color::Muted)
+                                    .handler({
+                                        let workspace = workspace.clone();
+                                        move |window, cx| {
+                                            if let Some(workspace) = workspace.upgrade() {
+                                                workspace.update(cx, |workspace, cx| {
+                                                    if let Some(panel) =
+                                                        workspace.panel::<AgentPanel>(cx)
+                                                    {
+                                                        panel.update(cx, |panel, cx| {
+                                                            panel.open_chat_tab(window, cx);
                                                         });
                                                     }
                                                 });
@@ -2984,6 +3192,9 @@ impl Render for AgentPanel {
             .key_context(self.key_context())
             .on_action(cx.listener(|this, action: &NewThread, window, cx| {
                 this.new_thread(action, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NewChatTab, window, cx| {
+                this.open_chat_tab(window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenHistory, window, cx| {
                 this.open_history(window, cx);

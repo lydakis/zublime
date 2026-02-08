@@ -61,6 +61,8 @@ actions!(
     [
         /// Creates a new text-based conversation thread.
         NewTextThread,
+        /// Opens a new chat tab in the active pane.
+        NewChatTab,
         /// Toggles the menu to create new agent threads.
         ToggleNewThreadMenu,
         /// Toggles the navigation menu for switching between threads and views.

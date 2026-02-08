@@ -35,14 +35,14 @@ use gpui::{
     pulsating_between,
 };
 use language::Buffer;
-use language_model::LanguageModelRegistry;
+use language_model::{LanguageModelProviderId, LanguageModelRegistry};
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use project::{AgentServerStore, ExternalAgentServerName, Project, ProjectEntryId};
 use prompt_store::{PromptId, PromptStore};
 use rope::Point;
 use settings::{NotifyWhenAgentWaiting, Settings as _, SettingsStore};
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use std::{collections::BTreeMap, rc::Rc, time::Duration};
@@ -81,9 +81,26 @@ use crate::{
 
 const STOPWATCH_THRESHOLD: Duration = Duration::from_secs(30);
 const TOKEN_THRESHOLD: u64 = 250;
+const OPEN_ROUTER_PROVIDER_ID: &str = "openrouter";
+const BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
 
 mod active_thread;
 pub use active_thread::*;
+
+#[derive(Clone, Debug)]
+pub struct NativeThreadSetup {
+    pub chat_tab: bool,
+    pub cwd: Option<PathBuf>,
+}
+
+impl NativeThreadSetup {
+    pub fn chat_tab(cwd: Option<PathBuf>) -> Self {
+        Self {
+            chat_tab: true,
+            cwd,
+        }
+    }
+}
 
 pub struct QueuedMessage {
     pub content: Vec<acp::ContentBlock>,
@@ -138,6 +155,31 @@ impl ThreadError {
             }
         }
     }
+}
+
+fn preferred_chat_tab_model(cx: &App) -> Option<Arc<dyn language_model::LanguageModel>> {
+    let registry = LanguageModelRegistry::read_global(cx);
+    for provider_id in [
+        LanguageModelProviderId::new(OPEN_ROUTER_PROVIDER_ID),
+        LanguageModelProviderId::new(BEDROCK_PROVIDER_ID),
+    ] {
+        let Some(provider) = registry.provider(&provider_id) else {
+            continue;
+        };
+        if !provider.is_authenticated(cx) {
+            continue;
+        }
+        if let Some(model) = provider
+            .default_model(cx)
+            .or_else(|| provider.default_fast_model(cx))
+        {
+            return Some(model);
+        }
+        if let Some(model) = provider.provided_models(cx).into_iter().next() {
+            return Some(model);
+        }
+    }
+    None
 }
 
 impl ProfileProvider for Entity<agent::Thread> {
@@ -246,6 +288,7 @@ impl AcpServerView {
         agent: Rc<dyn AgentServer>,
         resume_thread: Option<AgentSessionInfo>,
         initial_content: Option<ExternalAgentInitialContent>,
+        thread_setup: Option<NativeThreadSetup>,
         workspace: WeakEntity<Workspace>,
         project: Entity<Project>,
         thread_store: Option<Entity<ThreadStore>>,
@@ -297,6 +340,7 @@ impl AcpServerView {
                 prompt_capabilities,
                 available_commands,
                 initial_content,
+                thread_setup,
                 window,
                 cx,
             ),
@@ -326,6 +370,7 @@ impl AcpServerView {
             prompt_capabilities.clone(),
             available_commands.clone(),
             None,
+            None,
             window,
             cx,
         );
@@ -348,6 +393,7 @@ impl AcpServerView {
         prompt_capabilities: Rc<RefCell<PromptCapabilities>>,
         available_commands: Rc<RefCell<Vec<acp::AvailableCommand>>>,
         initial_content: Option<ExternalAgentInitialContent>,
+        thread_setup: Option<NativeThreadSetup>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> ServerState {
@@ -379,6 +425,10 @@ impl AcpServerView {
         let fallback_cwd = root_dir
             .clone()
             .unwrap_or_else(|| paths::home_dir().as_path().into());
+        let requested_cwd = thread_setup
+            .as_ref()
+            .and_then(|setup| setup.cwd.clone())
+            .unwrap_or_else(|| fallback_cwd.as_ref().to_path_buf());
         let (status_tx, mut status_rx) = watch::channel("Loading…".into());
         let (new_version_available_tx, mut new_version_available_rx) = watch::channel(None);
         let delegate = AgentServerDelegate::new(
@@ -414,10 +464,7 @@ impl AcpServerView {
             let mut resumed_without_history = false;
             let result = if let Some(resume) = resume_thread.clone() {
                 cx.update(|_, cx| {
-                    let session_cwd = resume
-                        .cwd
-                        .clone()
-                        .unwrap_or_else(|| fallback_cwd.as_ref().to_path_buf());
+                    let session_cwd = resume.cwd.clone().unwrap_or_else(|| requested_cwd.clone());
                     if connection.supports_load_session(cx) {
                         connection.clone().load_session(
                             resume,
@@ -444,7 +491,7 @@ impl AcpServerView {
                 cx.update(|_, cx| {
                     connection
                         .clone()
-                        .new_thread(project.clone(), fallback_cwd.as_ref(), cx)
+                        .new_thread(project.clone(), requested_cwd.as_path(), cx)
                 })
                 .log_err()
             };
@@ -470,6 +517,32 @@ impl AcpServerView {
             this.update_in(cx, |this, window, cx| {
                 match result {
                     Ok(thread) => {
+                        let session_id = thread.read(cx).session_id().clone();
+                        if let Some(setup) = thread_setup.clone()
+                            && setup.chat_tab
+                            && let Some(native_connection) = connection
+                                .clone()
+                                .downcast::<agent::NativeAgentConnection>(
+                            )
+                            && let Some(native_thread) = native_connection.thread(&session_id, cx)
+                        {
+                            let scoped_cwd = setup.cwd.unwrap_or_else(|| requested_cwd.clone());
+                            native_thread.update(cx, |native_thread, cx| {
+                                native_thread.set_chat_tab_scope(scoped_cwd, cx);
+                                let provider_is_preferred =
+                                    native_thread.model().is_some_and(|model| {
+                                        let provider = model.provider_id();
+                                        provider.0.as_ref() == OPEN_ROUTER_PROVIDER_ID
+                                            || provider.0.as_ref() == BEDROCK_PROVIDER_ID
+                                    });
+                                if !provider_is_preferred
+                                    && let Some(model) = preferred_chat_tab_model(cx)
+                                {
+                                    native_thread.set_model(model, cx);
+                                }
+                            });
+                        }
+
                         let action_log = thread.read(cx).action_log().clone();
 
                         prompt_capabilities.replace(thread.read(cx).prompt_capabilities());
@@ -502,7 +575,6 @@ impl AcpServerView {
                         AgentDiff::set_active_thread(&workspace, thread.clone(), window, cx);
 
                         let connection = thread.read(cx).connection().clone();
-                        let session_id = thread.read(cx).session_id().clone();
                         let session_list = if connection.supports_session_history(cx) {
                             connection.session_list(cx)
                         } else {
@@ -841,7 +913,7 @@ impl AcpServerView {
 
     pub fn title(&self, cx: &App) -> SharedString {
         match &self.server_state {
-            ServerState::Connected(_) => "New Thread".into(),
+            ServerState::Connected(connected) => connected.current.read(cx).thread.read(cx).title(),
             ServerState::Loading(loading_view) => loading_view.read(cx).title.clone(),
             ServerState::LoadError(error) => match error {
                 LoadError::Unsupported { .. } => format!("Upgrade {}", self.agent.name()).into(),
@@ -2462,6 +2534,7 @@ pub(crate) mod tests {
                     Rc::new(StubAgentServer::default_response()),
                     None,
                     None,
+                    None,
                     workspace.downgrade(),
                     project,
                     Some(thread_store),
@@ -2532,6 +2605,7 @@ pub(crate) mod tests {
                 AcpServerView::new(
                     Rc::new(StubAgentServer::new(ResumeOnlyAgentConnection)),
                     Some(session),
+                    None,
                     None,
                     workspace.downgrade(),
                     project,
@@ -2779,6 +2853,7 @@ pub(crate) mod tests {
             cx.new(|cx| {
                 AcpServerView::new(
                     Rc::new(agent),
+                    None,
                     None,
                     None,
                     workspace.downgrade(),
@@ -3180,6 +3255,7 @@ pub(crate) mod tests {
             cx.new(|cx| {
                 AcpServerView::new(
                     Rc::new(StubAgentServer::new(connection.as_ref().clone())),
+                    None,
                     None,
                     None,
                     workspace.downgrade(),

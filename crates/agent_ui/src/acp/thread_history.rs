@@ -27,6 +27,24 @@ fn thread_title(entry: &AgentSessionInfo) -> &SharedString {
         .unwrap_or(DEFAULT_TITLE)
 }
 
+fn is_chat_tab_entry(entry: &AgentSessionInfo) -> bool {
+    entry
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.get(agent::SESSION_META_THREAD_KIND_KEY))
+        .and_then(|value| value.as_str())
+        == Some(agent::SESSION_META_THREAD_KIND_CHAT_TAB)
+}
+
+fn display_thread_title(entry: &AgentSessionInfo) -> SharedString {
+    let title = thread_title(entry);
+    if is_chat_tab_entry(entry) {
+        format!("[Chat] {}", title).into()
+    } else {
+        title.clone()
+    }
+}
+
 pub struct AcpThreadHistory {
     session_list: Option<Rc<dyn AgentSessionList>>,
     sessions: Vec<AgentSessionInfo>,
@@ -635,7 +653,7 @@ impl AcpThreadHistory {
             (_, None) => "—".to_string(),
         };
 
-        let title = thread_title(entry).clone();
+        let title = display_thread_title(entry);
         let full_date = entry_time
             .map(|time| {
                 EntryTimeFormat::DateAndTime.format_timestamp(time.timestamp(), self.local_timezone)
@@ -656,7 +674,7 @@ impl AcpThreadHistory {
                             .gap_2()
                             .justify_between()
                             .child(
-                                HighlightedLabel::new(thread_title(entry), highlight_positions)
+                                HighlightedLabel::new(title.clone(), highlight_positions)
                                     .size(LabelSize::Small)
                                     .truncate(),
                             )
@@ -881,7 +899,7 @@ impl AcpHistoryEntryElement {
 impl RenderOnce for AcpHistoryEntryElement {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let id = ElementId::Name(self.entry.session_id.0.clone().into());
-        let title = thread_title(&self.entry).clone();
+        let title = display_thread_title(&self.entry);
         let formatted_time = self
             .entry
             .updated_at
